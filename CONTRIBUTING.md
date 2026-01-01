@@ -76,7 +76,7 @@ plugin/
 ├── notifier.js   # ntfy HTTP client
 ├── callback.js   # HTTP callback server for interactive responses
 ├── hostname.js   # Callback host discovery (Tailscale, env, localhost)
-└── tokens.js     # HMAC token signing for callback security
+└── nonces.js     # Single-use nonces for callback authentication
 ```
 
 ## Submitting Changes

@@ -17,6 +17,7 @@
 //   NTFY_RETRY_NOTIFY_FIRST - Notify on first retry (default: true)
 //   NTFY_RETRY_NOTIFY_AFTER - Also notify after N retries (default: 3)
 
+import { basename } from 'path'
 import { sendNotification } from './notifier.js'
 
 // Helper to parse boolean env vars
@@ -49,8 +50,7 @@ export const Notify = async ({ $, client, directory }) => {
   // TODO: Issue #6 - Discover callback host
   // TODO: Issue #4 - Start callback server
 
-  const cwd = process.cwd()
-  const dir = cwd.split('/').pop() || cwd
+  const dir = basename(process.cwd())
   let idleTimer = null
 
   return {
@@ -59,6 +59,8 @@ export const Notify = async ({ $, client, directory }) => {
         const status = event.properties?.status?.type
         if (status === 'idle' && !idleTimer) {
           idleTimer = setTimeout(async () => {
+            // Clear timer reference immediately to prevent race conditions
+            idleTimer = null
             await sendNotification({
               server: config.server,
               topic: config.topic,
@@ -66,7 +68,6 @@ export const Notify = async ({ $, client, directory }) => {
               message: dir,
               authToken: config.authToken,
             })
-            idleTimer = null
           }, config.idleDelayMs)
         } else if (status === 'busy' && idleTimer) {
           clearTimeout(idleTimer)

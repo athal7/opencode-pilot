@@ -33,7 +33,7 @@ export function createNonce(sessionId, permissionId) {
 
 /**
  * Consume a nonce, returning its data if valid
- * Nonce is deleted after consumption (single-use)
+ * Nonce is deleted immediately to prevent race conditions (single-use)
  * @param {string} nonce - The nonce to consume
  * @returns {Object|null} { sessionId, permissionId } or null if invalid/expired
  */
@@ -44,14 +44,13 @@ export function consumeNonce(nonce) {
     return null
   }
   
-  // Check TTL
+  // Delete immediately to prevent race conditions (single-use)
+  pending.delete(nonce)
+  
+  // Check TTL after deletion
   if (Date.now() - data.createdAt > NONCE_TTL_MS) {
-    pending.delete(nonce)
     return null
   }
-  
-  // Single-use: delete on consumption
-  pending.delete(nonce)
   
   return {
     sessionId: data.sessionId,

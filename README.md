@@ -36,9 +36,9 @@ NTFY_TOPIC=your-secret-topic
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NTFY_SERVER` | `https://ntfy.sh` | ntfy server URL |
+| `NTFY_TOKEN` | *(none)* | ntfy access token for protected topics |
 | `NTFY_CALLBACK_HOST` | *(auto-discover)* | Callback host for interactive notifications |
 | `NTFY_CALLBACK_PORT` | `4097` | Callback server port |
-| `NTFY_CALLBACK_SECRET` | *(auto-generate)* | HMAC secret for callback tokens |
 | `NTFY_IDLE_DELAY_MS` | `300000` | Idle notification delay (5 min) |
 | `NTFY_ERROR_NOTIFY` | `true` | Enable error notifications |
 | `NTFY_ERROR_DEBOUNCE_MS` | `60000` | Error notification debounce window |
