@@ -63,9 +63,9 @@ test_hostname_checks_env_var() {
   }
 }
 
-test_hostname_falls_back_to_localhost() {
-  grep -q "localhost" "$PLUGIN_DIR/hostname.js" || {
-    echo "Localhost fallback not found in hostname.js"
+test_hostname_returns_null_when_not_set() {
+  grep -q "return null" "$PLUGIN_DIR/hostname.js" || {
+    echo "Return null when not configured not found in hostname.js"
     return 1
   }
 }
@@ -108,7 +108,7 @@ test_hostname_returns_env_var_when_set() {
   fi
 }
 
-test_hostname_returns_localhost_when_not_set() {
+test_hostname_returns_null_when_not_set_functional() {
   if ! command -v node &>/dev/null; then
     echo "SKIP: node not available"
     return 0
@@ -122,8 +122,8 @@ test_hostname_returns_localhost_when_not_set() {
     import { getCallbackHost } from './plugin/hostname.js';
     
     const host = getCallbackHost();
-    if (host !== 'localhost') {
-      console.log('FAIL: Expected localhost, got ' + host);
+    if (host !== null) {
+      console.log('FAIL: Expected null, got ' + host);
       process.exit(1);
     }
     console.log('PASS');
@@ -166,7 +166,7 @@ echo "Implementation Tests:"
 
 for test_func in \
   test_hostname_checks_env_var \
-  test_hostname_falls_back_to_localhost \
+  test_hostname_returns_null_when_not_set \
   test_hostname_logs_host
 do
   run_test "${test_func#test_}" "$test_func"
@@ -177,7 +177,7 @@ echo "Functional Tests:"
 
 for test_func in \
   test_hostname_returns_env_var_when_set \
-  test_hostname_returns_localhost_when_not_set
+  test_hostname_returns_null_when_not_set_functional
 do
   run_test "${test_func#test_}" "$test_func"
 done

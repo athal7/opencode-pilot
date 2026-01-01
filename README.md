@@ -41,7 +41,7 @@ Configure in `~/.config/opencode/opencode.json` under the `ntfy` key:
 | `topic` | *(required)* | Your ntfy topic name |
 | `server` | `https://ntfy.sh` | ntfy server URL |
 | `token` | *(none)* | ntfy access token for protected topics |
-| `callbackHost` | `localhost` | Callback host for interactive notifications |
+| `callbackHost` | *(none)* | Callback host for interactive notifications (required for interactive features) |
 | `callbackPort` | `4097` | Callback server port |
 | `idleDelayMs` | `300000` | Idle notification delay (5 min) |
 | `errorNotify` | `true` | Enable error notifications |
@@ -60,7 +60,9 @@ export NTFY_CALLBACK_HOST=your-machine.tailnet.ts.net
 
 ### Interactive Permissions
 
-For interactive permission notifications to work, your phone must be able to reach the callback server:
+Interactive permission notifications require `callbackHost` to be configured. Without it, only read-only notifications (idle, error, retry) are sent.
+
+For interactive notifications to work, your phone must be able to reach the callback server:
 
 1. Set `callbackHost` to your machine's hostname accessible from your phone
 2. For Tailscale users: use your Tailscale hostname (e.g., `macbook.tail1234.ts.net`)

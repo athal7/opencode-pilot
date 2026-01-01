@@ -234,7 +234,7 @@ test_config_get_callback_host_from_config() {
   fi
 }
 
-test_config_get_callback_host_fallback() {
+test_config_get_callback_host_returns_null_when_not_configured() {
   if ! command -v node &>/dev/null; then
     echo "SKIP: node not available"
     return 0
@@ -247,8 +247,8 @@ test_config_get_callback_host_fallback() {
     const config = { callbackHost: null };
     const host = getCallbackHost(config);
     
-    if (host !== 'localhost') {
-      console.log('FAIL: Expected localhost, got ' + host);
+    if (host !== null) {
+      console.log('FAIL: Expected null, got ' + host);
       process.exit(1);
     }
     console.log('PASS');
@@ -308,7 +308,7 @@ for test_func in \
   test_config_load_returns_defaults \
   test_config_env_overrides_defaults \
   test_config_get_callback_host_from_config \
-  test_config_get_callback_host_fallback
+  test_config_get_callback_host_returns_null_when_not_configured
 do
   run_test "${test_func#test_}" "$test_func"
 done

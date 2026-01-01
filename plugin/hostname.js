@@ -6,9 +6,9 @@
 
 /**
  * Get the callback host for ntfy action buttons
- * Uses NTFY_CALLBACK_HOST env var, falls back to localhost
+ * Uses NTFY_CALLBACK_HOST env var
  *
- * @returns {string} The callback host
+ * @returns {string|null} The callback host, or null if not configured
  */
 export function getCallbackHost() {
   if (process.env.NTFY_CALLBACK_HOST) {
@@ -16,8 +16,7 @@ export function getCallbackHost() {
     return process.env.NTFY_CALLBACK_HOST
   }
 
-  console.warn('[opencode-ntfy] NTFY_CALLBACK_HOST not set, using localhost (interactive features local-only)')
-  return 'localhost'
+  return null
 }
 
 // Alias for backwards compatibility

@@ -85,7 +85,7 @@ export function loadConfig() {
 /**
  * Get the callback host from config
  * @param {Object} config - Config object from loadConfig()
- * @returns {string} The callback host
+ * @returns {string|null} The callback host, or null if not configured
  */
 export function getCallbackHost(config) {
   if (config.callbackHost) {
@@ -93,6 +93,5 @@ export function getCallbackHost(config) {
     return config.callbackHost
   }
 
-  console.warn('[opencode-ntfy] callbackHost not configured, using localhost (interactive features local-only)')
-  return 'localhost'
+  return null
 }
