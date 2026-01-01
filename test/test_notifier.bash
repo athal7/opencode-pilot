@@ -107,6 +107,22 @@ test_send_notification_logs_errors() {
   }
 }
 
+test_send_notification_supports_auth_token() {
+  # Should support optional auth token for ntfy Bearer auth
+  grep -q "token\|Token\|auth\|Auth\|Bearer" "$PLUGIN_DIR/notifier.js" || {
+    echo "Auth token support not found in notifier.js"
+    return 1
+  }
+}
+
+test_send_notification_uses_bearer_auth() {
+  # Should use Authorization: Bearer header when token provided
+  grep -q "Authorization.*Bearer\|Bearer.*Authorization" "$PLUGIN_DIR/notifier.js" || {
+    echo "Bearer auth header not found in notifier.js"
+    return 1
+  }
+}
+
 # =============================================================================
 # sendPermissionNotification Function Tests
 # =============================================================================
@@ -168,10 +184,10 @@ test_permission_notification_uses_callback_url() {
   }
 }
 
-test_permission_notification_includes_token() {
-  # Actions should include token in URL
-  grep -q "token" "$PLUGIN_DIR/notifier.js" || {
-    echo "token not included in notifier.js action URLs"
+test_permission_notification_includes_nonce() {
+  # Actions should include nonce in URL
+  grep -q "nonce" "$PLUGIN_DIR/notifier.js" || {
+    echo "nonce not included in notifier.js action URLs"
     return 1
   }
 }
@@ -239,7 +255,9 @@ for test_func in \
   test_send_notification_handles_optional_priority \
   test_send_notification_handles_optional_tags \
   test_send_notification_catches_errors \
-  test_send_notification_logs_errors
+  test_send_notification_logs_errors \
+  test_send_notification_supports_auth_token \
+  test_send_notification_uses_bearer_auth
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -255,7 +273,7 @@ for test_func in \
   test_permission_notification_has_reject_action \
   test_permission_notification_uses_http_action_type \
   test_permission_notification_uses_callback_url \
-  test_permission_notification_includes_token \
+  test_permission_notification_includes_nonce \
   test_permission_notification_includes_response_param \
   test_permission_notification_uses_high_priority \
   test_permission_notification_has_lock_emoji_title \

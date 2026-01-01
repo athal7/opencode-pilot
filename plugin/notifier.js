@@ -2,6 +2,23 @@
 // Implements Issue #3: Notifier module
 
 /**
+ * Build headers for ntfy requests
+ * @param {string} [authToken] - Optional ntfy access token for Bearer auth
+ * @returns {Object} Headers object
+ */
+function buildHeaders(authToken) {
+  const headers = {
+    'Content-Type': 'application/json',
+  }
+  
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`
+  }
+  
+  return headers
+}
+
+/**
  * Send a basic notification to ntfy
  * @param {Object} options
  * @param {string} options.server - ntfy server URL
@@ -10,8 +27,9 @@
  * @param {string} options.message - Notification message
  * @param {number} [options.priority] - Priority (1-5, default 3)
  * @param {string[]} [options.tags] - Emoji tags
+ * @param {string} [options.authToken] - Optional ntfy access token for protected topics
  */
-export async function sendNotification({ server, topic, title, message, priority, tags }) {
+export async function sendNotification({ server, topic, title, message, priority, tags, authToken }) {
   const body = {
     topic,
     title,
@@ -29,9 +47,7 @@ export async function sendNotification({ server, topic, title, message, priority
   try {
     const response = await fetch(server, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: buildHeaders(authToken),
       body: JSON.stringify(body),
     })
 
@@ -49,17 +65,19 @@ export async function sendNotification({ server, topic, title, message, priority
  * @param {string} options.server - ntfy server URL
  * @param {string} options.topic - ntfy topic name
  * @param {string} options.callbackUrl - Base URL for callbacks
- * @param {string} options.token - Signed token for callback authentication
+ * @param {string} options.nonce - Single-use nonce for callback authentication
  * @param {string} options.tool - Tool requesting permission
  * @param {string} options.description - Permission description
+ * @param {string} [options.authToken] - Optional ntfy access token for protected topics
  */
 export async function sendPermissionNotification({
   server,
   topic,
   callbackUrl,
-  token,
+  nonce,
   tool,
   description,
+  authToken,
 }) {
   const body = {
     topic,
@@ -71,21 +89,21 @@ export async function sendPermissionNotification({
       {
         action: 'http',
         label: 'Allow Once',
-        url: `${callbackUrl}?token=${token}&response=once`,
+        url: `${callbackUrl}?nonce=${nonce}&response=once`,
         method: 'POST',
         clear: true,
       },
       {
         action: 'http',
         label: 'Allow Always',
-        url: `${callbackUrl}?token=${token}&response=always`,
+        url: `${callbackUrl}?nonce=${nonce}&response=always`,
         method: 'POST',
         clear: true,
       },
       {
         action: 'http',
         label: 'Reject',
-        url: `${callbackUrl}?token=${token}&response=reject`,
+        url: `${callbackUrl}?nonce=${nonce}&response=reject`,
         method: 'POST',
         clear: true,
       },
@@ -95,9 +113,7 @@ export async function sendPermissionNotification({
   try {
     const response = await fetch(server, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: buildHeaders(authToken),
       body: JSON.stringify(body),
     })
 

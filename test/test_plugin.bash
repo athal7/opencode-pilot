@@ -36,8 +36,8 @@ test_plugin_hostname_exists() {
   assert_file_exists "$PLUGIN_DIR/hostname.js"
 }
 
-test_plugin_tokens_exists() {
-  assert_file_exists "$PLUGIN_DIR/tokens.js"
+test_plugin_nonces_exists() {
+  assert_file_exists "$PLUGIN_DIR/nonces.js"
 }
 
 # =============================================================================
@@ -88,13 +88,13 @@ test_hostname_js_syntax() {
   }
 }
 
-test_tokens_js_syntax() {
+test_nonces_js_syntax() {
   if ! command -v node &>/dev/null; then
     echo "SKIP: node not available"
     return 0
   fi
-  node --check "$PLUGIN_DIR/tokens.js" 2>&1 || {
-    echo "tokens.js has syntax errors"
+  node --check "$PLUGIN_DIR/nonces.js" 2>&1 || {
+    echo "nonces.js has syntax errors"
     return 1
   }
 }
@@ -104,12 +104,12 @@ test_tokens_js_syntax() {
 # =============================================================================
 
 test_config_has_all_required_fields() {
-  # Verify config object has all required fields from Issue #2
+  # Verify config object has all required fields
   local required_fields=(
     "topic"
     "server"
+    "authToken"
     "callbackPort"
-    "callbackSecret"
     "idleDelayMs"
     "errorNotify"
     "errorDebounceMs"
@@ -137,9 +137,9 @@ test_config_parses_ntfy_server() {
   }
 }
 
-test_config_parses_callback_secret() {
-  grep -q "NTFY_CALLBACK_SECRET" "$PLUGIN_DIR/index.js" || {
-    echo "NTFY_CALLBACK_SECRET env var parsing not found"
+test_config_parses_ntfy_token() {
+  grep -q "NTFY_TOKEN" "$PLUGIN_DIR/index.js" || {
+    echo "NTFY_TOKEN env var parsing not found"
     return 1
   }
 }
@@ -339,16 +339,16 @@ test_hostname_exports_discover_callback_host() {
   }
 }
 
-test_tokens_exports_create_token() {
-  grep -q "export.*createToken" "$PLUGIN_DIR/tokens.js" || {
-    echo "createToken export not found in tokens.js"
+test_nonces_exports_create_nonce() {
+  grep -q "export.*createNonce" "$PLUGIN_DIR/nonces.js" || {
+    echo "createNonce export not found in nonces.js"
     return 1
   }
 }
 
-test_tokens_exports_verify_token() {
-  grep -q "export.*verifyToken" "$PLUGIN_DIR/tokens.js" || {
-    echo "verifyToken export not found in tokens.js"
+test_nonces_exports_consume_nonce() {
+  grep -q "export.*consumeNonce" "$PLUGIN_DIR/nonces.js" || {
+    echo "consumeNonce export not found in nonces.js"
     return 1
   }
 }
@@ -495,7 +495,7 @@ for test_func in \
   test_plugin_notifier_exists \
   test_plugin_callback_exists \
   test_plugin_hostname_exists \
-  test_plugin_tokens_exists
+  test_plugin_nonces_exists
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -508,7 +508,7 @@ for test_func in \
   test_notifier_js_syntax \
   test_callback_js_syntax \
   test_hostname_js_syntax \
-  test_tokens_js_syntax
+  test_nonces_js_syntax
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -519,7 +519,7 @@ echo "Configuration Parsing Tests:"
 for test_func in \
   test_config_has_all_required_fields \
   test_config_parses_ntfy_server \
-  test_config_parses_callback_secret \
+  test_config_parses_ntfy_token \
   test_config_parses_error_notify \
   test_config_parses_error_debounce \
   test_config_parses_retry_notify_first \
@@ -568,8 +568,8 @@ for test_func in \
   test_notifier_exports_send_permission_notification \
   test_callback_exports_start_callback_server \
   test_hostname_exports_discover_callback_host \
-  test_tokens_exports_create_token \
-  test_tokens_exports_verify_token
+  test_nonces_exports_create_nonce \
+  test_nonces_exports_consume_nonce
 do
   run_test "${test_func#test_}" "$test_func"
 done
