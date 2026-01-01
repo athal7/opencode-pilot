@@ -1,12 +1,12 @@
 // Callback host configuration
 // Implements Issue #6: Host discovery module
+//
+// Note: This module is kept for backwards compatibility.
+// Prefer using config.js getCallbackHost() directly.
 
 /**
  * Get the callback host for ntfy action buttons
- *
- * Priority:
- * 1. NTFY_CALLBACK_HOST env var (explicit configuration)
- * 2. Fallback to 'localhost' (interactive features local-only)
+ * Uses NTFY_CALLBACK_HOST env var, falls back to localhost
  *
  * @returns {string} The callback host
  */
@@ -20,5 +20,5 @@ export function getCallbackHost() {
   return 'localhost'
 }
 
-// Keep old name for backwards compatibility
+// Alias for backwards compatibility
 export const discoverCallbackHost = () => getCallbackHost()
