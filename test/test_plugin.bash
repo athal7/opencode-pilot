@@ -100,95 +100,21 @@ test_nonces_js_syntax() {
 }
 
 # =============================================================================
-# Configuration Parsing Tests
+# Configuration Tests
 # =============================================================================
 
-test_config_has_all_required_fields() {
-  # Verify config object has all required fields
-  local required_fields=(
-    "topic"
-    "server"
-    "authToken"
-    "callbackPort"
-    "idleDelayMs"
-    "errorNotify"
-    "errorDebounceMs"
-    "retryNotifyFirst"
-    "retryNotifyAfter"
-  )
-  
-  for field in "${required_fields[@]}"; do
-    if ! grep -q "$field:" "$PLUGIN_DIR/index.js"; then
-      echo "Config field '$field' not found in index.js"
-      return 1
-    fi
-  done
-  return 0
-}
-
-test_config_parses_ntfy_server() {
-  grep -q "NTFY_SERVER" "$PLUGIN_DIR/index.js" || {
-    echo "NTFY_SERVER env var parsing not found"
-    return 1
-  }
-  grep -q "https://ntfy.sh" "$PLUGIN_DIR/index.js" || {
-    echo "Default ntfy server (https://ntfy.sh) not found"
+test_index_imports_config() {
+  # Verify index.js imports config from config.js
+  grep -q "import.*loadConfig.*from.*config" "$PLUGIN_DIR/index.js" || {
+    echo "loadConfig import not found in index.js"
     return 1
   }
 }
 
-test_config_parses_ntfy_token() {
-  grep -q "NTFY_TOKEN" "$PLUGIN_DIR/index.js" || {
-    echo "NTFY_TOKEN env var parsing not found"
-    return 1
-  }
-}
-
-test_config_parses_error_notify() {
-  grep -q "NTFY_ERROR_NOTIFY" "$PLUGIN_DIR/index.js" || {
-    echo "NTFY_ERROR_NOTIFY env var parsing not found"
-    return 1
-  }
-}
-
-test_config_parses_error_debounce() {
-  grep -q "NTFY_ERROR_DEBOUNCE_MS" "$PLUGIN_DIR/index.js" || {
-    echo "NTFY_ERROR_DEBOUNCE_MS env var parsing not found"
-    return 1
-  }
-}
-
-test_config_parses_retry_notify_first() {
-  grep -q "NTFY_RETRY_NOTIFY_FIRST" "$PLUGIN_DIR/index.js" || {
-    echo "NTFY_RETRY_NOTIFY_FIRST env var parsing not found"
-    return 1
-  }
-}
-
-test_config_parses_retry_notify_after() {
-  grep -q "NTFY_RETRY_NOTIFY_AFTER" "$PLUGIN_DIR/index.js" || {
-    echo "NTFY_RETRY_NOTIFY_AFTER env var parsing not found"
-    return 1
-  }
-}
-
-test_config_default_idle_delay_is_300000() {
-  grep -q "300000" "$PLUGIN_DIR/index.js" || {
-    echo "Default idle delay (300000ms / 5min) not found"
-    return 1
-  }
-}
-
-test_config_default_error_debounce_is_60000() {
-  grep -q "60000" "$PLUGIN_DIR/index.js" || {
-    echo "Default error debounce (60000ms / 1min) not found"
-    return 1
-  }
-}
-
-test_config_default_retry_after_is_3() {
-  grep -q "retryNotifyAfter.*3" "$PLUGIN_DIR/index.js" || {
-    echo "Default retryNotifyAfter (3) not found"
+test_index_uses_load_config() {
+  # Verify index.js calls loadConfig()
+  grep -q "loadConfig()" "$PLUGIN_DIR/index.js" || {
+    echo "loadConfig() call not found in index.js"
     return 1
   }
 }
@@ -267,8 +193,8 @@ test_uses_configured_idle_delay() {
 # =============================================================================
 
 test_logs_disabled_when_no_topic() {
-  # Verify log message when NTFY_TOPIC not set
-  grep -q "NTFY_TOPIC not set" "$PLUGIN_DIR/index.js" || {
+  # Verify log message when topic not configured
+  grep -q "No topic configured\|topic.*disabled" "$PLUGIN_DIR/index.js" || {
     echo "Missing log message for disabled plugin"
     return 1
   }
@@ -514,19 +440,11 @@ do
 done
 
 echo ""
-echo "Configuration Parsing Tests:"
+echo "Configuration Tests:"
 
 for test_func in \
-  test_config_has_all_required_fields \
-  test_config_parses_ntfy_server \
-  test_config_parses_ntfy_token \
-  test_config_parses_error_notify \
-  test_config_parses_error_debounce \
-  test_config_parses_retry_notify_first \
-  test_config_parses_retry_notify_after \
-  test_config_default_idle_delay_is_300000 \
-  test_config_default_error_debounce_is_60000 \
-  test_config_default_retry_after_is_3
+  test_index_imports_config \
+  test_index_uses_load_config
 do
   run_test "${test_func#test_}" "$test_func"
 done

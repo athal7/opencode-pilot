@@ -5,4 +5,6 @@ fileignoreconfig:
   checksum: f0af468cdbc917a8db548735d81ceadb673cc02c4654a49cba895eb469e9c50c
 - filename: plugin/index.js
   checksum: fc5b9db24c83987c29c8fe565e7101d1e2943bafe47a500b01f1ca31e0614dbf
+- filename: plugin/config.js
+  checksum: ef528e2a4cb37420dd2aef689b5e2a7e4940ebf8de426d6e92ddec3ef3325145
 version: "1.0"

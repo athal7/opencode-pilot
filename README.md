@@ -7,7 +7,6 @@ ntfy notification plugin for [OpenCode](https://github.com/sst/opencode) with in
 - **Idle notifications** - Get notified when OpenCode has been waiting for input for 5+ minutes
 - **Interactive permissions** - Respond to permission requests directly from your phone via ntfy action buttons
 - **Error & retry alerts** - Stay informed when something needs attention
-- **Tailscale-friendly** - Automatic hostname discovery for callback URLs
 
 ## Installation
 
@@ -23,35 +22,51 @@ curl -fsSL https://raw.githubusercontent.com/athal7/opencode-ntfy/main/install.s
 
 ## Configuration
 
-### Required
+Configure in `~/.config/opencode/opencode.json` under the `ntfy` key:
 
-Set your ntfy topic in `~/.env` (loaded by direnv):
-
-```bash
-NTFY_TOPIC=your-secret-topic
+```json
+{
+  "plugin": ["~/.config/opencode/plugins/opencode-ntfy"],
+  "ntfy": {
+    "topic": "your-secret-topic",
+    "callbackHost": "your-machine.tailnet.ts.net"
+  }
+}
 ```
 
-### Optional
+### Options
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NTFY_SERVER` | `https://ntfy.sh` | ntfy server URL |
-| `NTFY_TOKEN` | *(none)* | ntfy access token for protected topics |
-| `NTFY_CALLBACK_HOST` | *(auto-discover)* | Callback host for interactive notifications |
-| `NTFY_CALLBACK_PORT` | `4097` | Callback server port |
-| `NTFY_IDLE_DELAY_MS` | `300000` | Idle notification delay (5 min) |
-| `NTFY_ERROR_NOTIFY` | `true` | Enable error notifications |
-| `NTFY_ERROR_DEBOUNCE_MS` | `60000` | Error notification debounce window |
-| `NTFY_RETRY_NOTIFY_FIRST` | `true` | Notify on first retry |
-| `NTFY_RETRY_NOTIFY_AFTER` | `3` | Also notify after N retries (0 to disable) |
+| Key | Default | Description |
+|-----|---------|-------------|
+| `topic` | *(required)* | Your ntfy topic name |
+| `server` | `https://ntfy.sh` | ntfy server URL |
+| `token` | *(none)* | ntfy access token for protected topics |
+| `callbackHost` | *(none)* | Callback host for interactive notifications (required for interactive features) |
+| `callbackPort` | `4097` | Callback server port |
+| `idleDelayMs` | `300000` | Idle notification delay (5 min) |
+| `errorNotify` | `true` | Enable error notifications |
+| `errorDebounceMs` | `60000` | Error notification debounce window |
+| `retryNotifyFirst` | `true` | Notify on first retry |
+| `retryNotifyAfter` | `3` | Also notify after N retries (0 to disable) |
+
+### Environment Variables
+
+Environment variables override config file values. Use `NTFY_` prefix:
+
+```bash
+export NTFY_TOPIC=your-secret-topic
+export NTFY_CALLBACK_HOST=your-machine.tailnet.ts.net
+```
 
 ### Interactive Permissions
 
-For interactive permission notifications to work, your phone must be able to reach the callback server. If you're using Tailscale:
+Interactive permission notifications require `callbackHost` to be configured. Without it, only read-only notifications (idle, error, retry) are sent.
 
-1. Ensure both your computer and phone are on the same Tailscale network
-2. The plugin will automatically discover your Tailscale hostname
-3. Or set `NTFY_CALLBACK_HOST` explicitly to your Tailscale hostname
+For interactive notifications to work, your phone must be able to reach the callback server:
+
+1. Set `callbackHost` to your machine's hostname accessible from your phone
+2. For Tailscale users: use your Tailscale hostname (e.g., `macbook.tail1234.ts.net`)
+3. Ensure port 4097 (or your configured `callbackPort`) is accessible
 
 ## Notifications
 
