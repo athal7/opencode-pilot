@@ -40,6 +40,10 @@ test_plugin_nonces_exists() {
   assert_file_exists "$PLUGIN_DIR/nonces.js"
 }
 
+test_plugin_service_client_exists() {
+  assert_file_exists "$PLUGIN_DIR/service-client.js"
+}
+
 # =============================================================================
 # JavaScript Syntax Validation Tests
 # =============================================================================
@@ -95,6 +99,17 @@ test_nonces_js_syntax() {
   fi
   node --check "$PLUGIN_DIR/nonces.js" 2>&1 || {
     echo "nonces.js has syntax errors"
+    return 1
+  }
+}
+
+test_service_client_js_syntax() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  node --check "$PLUGIN_DIR/service-client.js" 2>&1 || {
+    echo "service-client.js has syntax errors"
     return 1
   }
 }
@@ -280,6 +295,31 @@ test_nonces_exports_consume_nonce() {
 }
 
 # =============================================================================
+# Service Integration Tests
+# =============================================================================
+
+test_index_imports_service_client() {
+  grep -q "import.*service-client\|from.*service-client" "$PLUGIN_DIR/index.js" || {
+    echo "service-client import not found in index.js"
+    return 1
+  }
+}
+
+test_index_connects_to_service() {
+  grep -q "connectToService" "$PLUGIN_DIR/index.js" || {
+    echo "connectToService call not found in index.js"
+    return 1
+  }
+}
+
+test_index_handles_permission_updated() {
+  grep -q "permission.updated\|permission\.updated" "$PLUGIN_DIR/index.js" || {
+    echo "permission.updated event handling not found in index.js"
+    return 1
+  }
+}
+
+# =============================================================================
 # OpenCode Runtime Integration Tests
 # =============================================================================
 # These tests verify the plugin doesn't hang opencode on startup and
@@ -421,7 +461,8 @@ for test_func in \
   test_plugin_notifier_exists \
   test_plugin_callback_exists \
   test_plugin_hostname_exists \
-  test_plugin_nonces_exists
+  test_plugin_nonces_exists \
+  test_plugin_service_client_exists
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -434,7 +475,8 @@ for test_func in \
   test_notifier_js_syntax \
   test_callback_js_syntax \
   test_hostname_js_syntax \
-  test_nonces_js_syntax
+  test_nonces_js_syntax \
+  test_service_client_js_syntax
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -488,6 +530,17 @@ for test_func in \
   test_hostname_exports_discover_callback_host \
   test_nonces_exports_create_nonce \
   test_nonces_exports_consume_nonce
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Service Integration Tests:"
+
+for test_func in \
+  test_index_imports_service_client \
+  test_index_connects_to_service \
+  test_index_handles_permission_updated
 do
   run_test "${test_func#test_}" "$test_func"
 done
