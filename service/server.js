@@ -10,7 +10,8 @@
 import { createServer as createHttpServer } from 'http'
 import { createServer as createNetServer } from 'net'
 import { randomUUID } from 'crypto'
-import { existsSync, unlinkSync } from 'fs'
+import { existsSync, unlinkSync, realpathSync } from 'fs'
+import { fileURLToPath } from 'url'
 
 // Default configuration
 const DEFAULT_HTTP_PORT = 4097
@@ -353,8 +354,19 @@ export async function stopService(service) {
 }
 
 // If run directly, start the service
-const isMainModule = import.meta.url === `file://${process.argv[1]}`
-if (isMainModule) {
+// Use realpath comparison to handle symlinks (e.g., /tmp vs /private/tmp on macOS,
+// or /opt/homebrew/opt vs /opt/homebrew/Cellar)
+function isMainModule() {
+  try {
+    const currentFile = realpathSync(fileURLToPath(import.meta.url))
+    const argvFile = realpathSync(process.argv[1])
+    return currentFile === argvFile
+  } catch {
+    return false
+  }
+}
+
+if (isMainModule()) {
   const config = {
     httpPort: parseInt(process.env.NTFY_CALLBACK_PORT || '4097', 10),
     socketPath: process.env.NTFY_SOCKET_PATH || DEFAULT_SOCKET_PATH,
