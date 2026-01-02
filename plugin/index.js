@@ -9,8 +9,16 @@
 // See README.md for full configuration options.
 
 import { basename } from 'path'
-import { sendNotification } from './notifier.js'
+import { randomUUID } from 'crypto'
+import { sendNotification, sendPermissionNotification } from './notifier.js'
 import { loadConfig } from './config.js'
+import {
+  connectToService,
+  disconnectFromService,
+  isConnected,
+  requestNonce,
+  setPermissionHandler,
+} from './service-client.js'
 
 // Load configuration from opencode.json and environment
 const config = loadConfig()
@@ -22,19 +30,67 @@ export const Notify = async ({ $, client, directory }) => {
   }
 
   console.log(`[opencode-ntfy] Initialized for topic: ${config.topic}`)
+  
+  // Session ID for this plugin instance
+  const sessionId = randomUUID()
+  
+  // Interactive mode state
+  let serviceConnected = false
+  
   if (config.callbackHost) {
     console.log(`[opencode-ntfy] Interactive mode enabled (callback: ${config.callbackHost}:${config.callbackPort})`)
+    
+    // Set up permission response handler
+    setPermissionHandler(async (permissionId, response) => {
+      console.log(`[opencode-ntfy] Permission response received: ${permissionId} -> ${response}`)
+      
+      // Map response to OpenCode permission action
+      let action
+      switch (response) {
+        case 'once':
+          action = 'allow'
+          break
+        case 'always':
+          action = 'allowAlways'
+          break
+        case 'reject':
+          action = 'deny'
+          break
+        default:
+          console.warn(`[opencode-ntfy] Unknown response type: ${response}`)
+          return
+      }
+      
+      // Submit permission response to OpenCode
+      try {
+        await client.permission.respond({
+          id: permissionId,
+          action,
+        })
+        console.log(`[opencode-ntfy] Permission ${permissionId} resolved with action: ${action}`)
+      } catch (error) {
+        console.warn(`[opencode-ntfy] Failed to respond to permission ${permissionId}: ${error.message}`)
+      }
+    })
+    
+    // Connect to service
+    serviceConnected = await connectToService({ sessionId })
+    if (serviceConnected) {
+      console.log('[opencode-ntfy] Connected to callback service')
+    } else {
+      console.log('[opencode-ntfy] Callback service not running, interactive permissions disabled')
+      console.log('[opencode-ntfy] Start service with: launchctl load ~/Library/LaunchAgents/io.opencode.ntfy.plist')
+    }
   } else {
     console.log('[opencode-ntfy] Read-only mode (set callbackHost for interactive permissions)')
   }
-
-  // TODO: Issue #4 - Start callback server if callbackHost is configured
 
   const dir = basename(process.cwd())
   let idleTimer = null
 
   return {
     event: async ({ event }) => {
+      // Handle session status events (idle notifications)
       if (event.type === 'session.status') {
         const status = event.properties?.status?.type
         if (status === 'idle' && !idleTimer) {
@@ -54,8 +110,61 @@ export const Notify = async ({ $, client, directory }) => {
           idleTimer = null
         }
       }
-      // TODO: Issue #3 - Handle permission.updated events
+      
+      // Handle permission.updated events (interactive permissions)
+      if (event.type === 'permission.updated') {
+        const permission = event.properties?.permission
+        if (!permission || permission.status !== 'pending' || !permission.id) {
+          return
+        }
+        
+        // Only send interactive notifications if service is connected
+        if (!config.callbackHost || !isConnected()) {
+          return
+        }
+        
+        const permissionId = permission.id
+        const tool = permission.tool || 'Unknown tool'
+        const description = permission.description || 'Permission requested'
+        
+        try {
+          // Request nonce from service
+          const nonce = await requestNonce(permissionId)
+          
+          // Build callback URL
+          const callbackUrl = `http://${config.callbackHost}:${config.callbackPort}/callback`
+          
+          // Send permission notification with action buttons
+          await sendPermissionNotification({
+            server: config.server,
+            topic: config.topic,
+            callbackUrl,
+            nonce,
+            tool,
+            description,
+            authToken: config.authToken,
+          })
+          
+          console.log(`[opencode-ntfy] Permission notification sent for: ${tool}`)
+        } catch (error) {
+          console.warn(`[opencode-ntfy] Failed to send permission notification: ${error.message}`)
+        }
+      }
+      
       // TODO: Issue #7 - Handle error and retry events
+    },
+    
+    // Cleanup on shutdown
+    shutdown: async () => {
+      if (idleTimer) {
+        clearTimeout(idleTimer)
+        idleTimer = null
+      }
+      
+      // Use isConnected() as the source of truth (socket may have closed unexpectedly)
+      if (isConnected()) {
+        await disconnectFromService()
+      }
     },
   }
 }

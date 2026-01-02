@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Install opencode-ntfy plugin
+# Install opencode-ntfy plugin and callback service
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/athal7/opencode-ntfy/main/install.sh | bash
@@ -14,14 +14,19 @@ set -euo pipefail
 REPO="athal7/opencode-ntfy"
 PLUGIN_NAME="opencode-ntfy"
 PLUGIN_DIR="$HOME/.config/opencode/plugins/$PLUGIN_NAME"
+SERVICE_DIR="$HOME/.local/share/opencode-ntfy"
 CONFIG_FILE="$HOME/.config/opencode/opencode.json"
-PLUGIN_FILES="index.js notifier.js callback.js hostname.js nonces.js"
+PLIST_DIR="$HOME/Library/LaunchAgents"
+PLIST_NAME="io.opencode.ntfy.plist"
+PLUGIN_FILES="index.js notifier.js callback.js hostname.js nonces.js config.js service-client.js"
+SERVICE_FILES="server.js"
 
 echo "Installing $PLUGIN_NAME..."
 echo ""
 
-# Create plugin directory
+# Create directories
 mkdir -p "$PLUGIN_DIR"
+mkdir -p "$SERVICE_DIR"
 
 # Check if we're running from a local clone or need to download
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}" 2>/dev/null)" && pwd 2>/dev/null)" || SCRIPT_DIR=""
@@ -30,10 +35,21 @@ if [[ -n "$SCRIPT_DIR" ]] && [[ -f "$SCRIPT_DIR/plugin/index.js" ]]; then
   # Local install from clone
   echo "Installing from local directory..."
   
+  echo ""
+  echo "Plugin files:"
   for file in $PLUGIN_FILES; do
     if [[ -f "$SCRIPT_DIR/plugin/$file" ]]; then
       cp "$SCRIPT_DIR/plugin/$file" "$PLUGIN_DIR/$file"
-      echo "  Installed: $file"
+      echo "  Installed: plugin/$file -> $PLUGIN_DIR/$file"
+    fi
+  done
+  
+  echo ""
+  echo "Service files:"
+  for file in $SERVICE_FILES; do
+    if [[ -f "$SCRIPT_DIR/service/$file" ]]; then
+      cp "$SCRIPT_DIR/service/$file" "$SERVICE_DIR/$file"
+      echo "  Installed: service/$file -> $SERVICE_DIR/$file"
     fi
   done
 else
@@ -41,8 +57,21 @@ else
   echo "Downloading plugin files from GitHub..."
   
   for file in $PLUGIN_FILES; do
-    echo "  Downloading: $file"
+    echo "  Downloading: plugin/$file"
     if curl -fsSL "https://raw.githubusercontent.com/$REPO/main/plugin/$file" -o "$PLUGIN_DIR/$file"; then
+      echo "  Installed: $file"
+    else
+      echo "  ERROR: Failed to download $file"
+      exit 1
+    fi
+  done
+  
+  echo ""
+  echo "Downloading service files from GitHub..."
+  
+  for file in $SERVICE_FILES; do
+    echo "  Downloading: service/$file"
+    if curl -fsSL "https://raw.githubusercontent.com/$REPO/main/service/$file" -o "$SERVICE_DIR/$file"; then
       echo "  Installed: $file"
     else
       echo "  ERROR: Failed to download $file"
@@ -53,6 +82,70 @@ fi
 
 echo ""
 echo "Plugin files installed to: $PLUGIN_DIR"
+echo "Service files installed to: $SERVICE_DIR"
+
+# Install LaunchAgent plist (macOS only)
+if [[ "$(uname)" == "Darwin" ]]; then
+  echo ""
+  echo "Installing LaunchAgent for callback service..."
+  
+  mkdir -p "$PLIST_DIR"
+  
+  # Find node path (handle both Intel and Apple Silicon Macs)
+  NODE_PATH=$(command -v node 2>/dev/null)
+  if [[ -z "$NODE_PATH" ]]; then
+    # Try Homebrew paths
+    if [[ -x "/opt/homebrew/bin/node" ]]; then
+      NODE_PATH="/opt/homebrew/bin/node"
+    elif [[ -x "/usr/local/bin/node" ]]; then
+      NODE_PATH="/usr/local/bin/node"
+    else
+      echo "  WARNING: node not found, please install Node.js"
+      NODE_PATH="/usr/local/bin/node"
+    fi
+  fi
+  
+  # Generate plist with correct paths
+  cat > "$PLIST_DIR/$PLIST_NAME" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.opencode.ntfy</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>$NODE_PATH</string>
+        <string>$SERVICE_DIR/server.js</string>
+    </array>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>KeepAlive</key>
+    <true/>
+    
+    <key>StandardOutPath</key>
+    <string>$HOME/.local/share/opencode-ntfy/opencode-ntfy.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>$HOME/.local/share/opencode-ntfy/opencode-ntfy.log</string>
+    
+    <key>WorkingDirectory</key>
+    <string>$SERVICE_DIR</string>
+</dict>
+</plist>
+EOF
+  
+  echo "  LaunchAgent installed to: $PLIST_DIR/$PLIST_NAME"
+  echo ""
+  echo "  To start the callback service:"
+  echo "    launchctl load $PLIST_DIR/$PLIST_NAME"
+  echo ""
+  echo "  To stop the callback service:"
+  echo "    launchctl unload $PLIST_DIR/$PLIST_NAME"
+fi
 
 # Configure opencode.json
 echo ""
@@ -144,7 +237,10 @@ echo "  NTFY_TOKEN=tk_xxx                  # ntfy access token for protected top
 echo "  NTFY_CALLBACK_HOST=host.ts.net     # Callback host for interactive notifications"
 echo "  NTFY_CALLBACK_PORT=4097            # Callback server port"
 echo "  NTFY_IDLE_DELAY_MS=300000          # Idle notification delay (5 min)"
+
 echo ""
-echo "For interactive permissions, ensure your phone can reach"
-echo "the callback URL (e.g., via Tailscale)."
+echo "For interactive permissions:"
+echo "  1. Set NTFY_CALLBACK_HOST to your machine's hostname (e.g., via Tailscale)"
+echo "  2. Start the callback service: launchctl load ~/Library/LaunchAgents/$PLIST_NAME"
+echo "  3. Ensure your phone can reach the callback URL"
 echo ""

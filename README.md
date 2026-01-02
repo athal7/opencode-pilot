@@ -60,13 +60,52 @@ export NTFY_CALLBACK_HOST=your-machine.tailnet.ts.net
 
 ### Interactive Permissions
 
-Interactive permission notifications require `callbackHost` to be configured. Without it, only read-only notifications (idle, error, retry) are sent.
+Interactive permission notifications require `callbackHost` to be configured AND the callback service to be running. Without these, only read-only notifications (idle, error, retry) are sent.
+
+#### Starting the Callback Service
+
+The callback service runs persistently to handle permission responses from ntfy.
+
+**If installed via Homebrew (recommended):**
+
+```bash
+# Start the service (runs at login)
+brew services start opencode-ntfy
+
+# Check service status
+brew services info opencode-ntfy
+
+# View logs
+tail -f ~/Library/Logs/Homebrew/opencode-ntfy.log
+
+# Stop the service
+brew services stop opencode-ntfy
+```
+
+**If installed manually:**
+
+```bash
+# Start the service
+launchctl load ~/Library/LaunchAgents/io.opencode.ntfy.plist
+
+# Check service status
+launchctl list | grep opencode
+
+# View logs
+tail -f ~/.local/share/opencode-ntfy/opencode-ntfy.log
+
+# Stop the service
+launchctl unload ~/Library/LaunchAgents/io.opencode.ntfy.plist
+```
+
+#### Configuring Callback Access
 
 For interactive notifications to work, your phone must be able to reach the callback server:
 
 1. Set `callbackHost` to your machine's hostname accessible from your phone
 2. For Tailscale users: use your Tailscale hostname (e.g., `macbook.tail1234.ts.net`)
 3. Ensure port 4097 (or your configured `callbackPort`) is accessible
+4. Start the callback service (see above)
 
 ## Notifications
 
