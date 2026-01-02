@@ -114,8 +114,8 @@ export const Notify = async ({ $, client, directory }) => {
             await sendNotification({
               server: config.server,
               topic: config.topic,
-              title: 'OpenCode: Retry',
-              message: `${dir} - Retry #${retryCount}`,
+              title: `Retry (${repoName})`,
+              message: `Retry attempt #${retryCount}`,
               priority: 4,
               tags: ['repeat'],
               authToken: config.authToken,
@@ -175,8 +175,8 @@ export const Notify = async ({ $, client, directory }) => {
           await sendNotification({
             server: config.server,
             topic: config.topic,
-            title: 'OpenCode: Error',
-            message: `${dir} - ${errorMessage}`,
+            title: `Error (${repoName})`,
+            message: errorMessage,
             priority: 5,
             tags: ['warning'],
             authToken: config.authToken,
