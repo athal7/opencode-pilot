@@ -1,6 +1,7 @@
 {
   "name": "opencode-ntfy",
   "private": true,
+  "type": "module",
   "description": "ntfy notification plugin for OpenCode with interactive permissions",
   "repository": {
     "type": "git",
