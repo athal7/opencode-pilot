@@ -64,7 +64,25 @@ Interactive permission notifications require `callbackHost` to be configured AND
 
 #### Starting the Callback Service
 
-The callback service runs persistently to handle permission responses from ntfy. Start it with:
+The callback service runs persistently to handle permission responses from ntfy.
+
+**If installed via Homebrew (recommended):**
+
+```bash
+# Start the service (runs at login)
+brew services start opencode-ntfy
+
+# Check service status
+brew services info opencode-ntfy
+
+# View logs
+tail -f ~/Library/Logs/Homebrew/opencode-ntfy.log
+
+# Stop the service
+brew services stop opencode-ntfy
+```
+
+**If installed manually:**
 
 ```bash
 # Start the service
