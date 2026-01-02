@@ -105,24 +105,21 @@ export async function sendPermissionNotification({
     tags: ['lock'],
     actions: [
       {
-        action: 'http',
+        action: 'view',
         label: 'Allow Once',
         url: `${callbackUrl}?nonce=${nonce}&response=once`,
-        method: 'POST',
         clear: true,
       },
       {
-        action: 'http',
+        action: 'view',
         label: 'Allow Always',
         url: `${callbackUrl}?nonce=${nonce}&response=always`,
-        method: 'POST',
         clear: true,
       },
       {
-        action: 'http',
+        action: 'view',
         label: 'Reject',
         url: `${callbackUrl}?nonce=${nonce}&response=reject`,
-        method: 'POST',
         clear: true,
       },
     ],

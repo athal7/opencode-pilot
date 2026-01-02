@@ -28,6 +28,40 @@ const sessions = new Map()
 const VALID_RESPONSES = ['once', 'always', 'reject']
 
 /**
+ * Generate a simple HTML response page
+ * @param {string} title - Page title
+ * @param {string} message - Message to display
+ * @param {boolean} success - Whether the operation succeeded
+ * @returns {string} HTML content
+ */
+function htmlResponse(title, message, success) {
+  const color = success ? '#22c55e' : '#ef4444'
+  const icon = success ? '✓' : '✗'
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title} - opencode-ntfy</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #1a1a1a; color: #fff; }
+    .container { text-align: center; padding: 2rem; }
+    .icon { font-size: 4rem; color: ${color}; }
+    .message { font-size: 1.5rem; margin-top: 1rem; }
+    .hint { color: #888; margin-top: 1rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">${icon}</div>
+    <div class="message">${message}</div>
+    <div class="hint">You can close this tab</div>
+  </div>
+</body>
+</html>`
+}
+
+/**
  * Create a nonce for a permission request
  * @param {string} sessionId - OpenCode session ID
  * @param {string} permissionId - Permission request ID
@@ -141,41 +175,43 @@ function createCallbackServer(port) {
       return
     }
     
-    // POST /callback - Permission response from ntfy
-    if (req.method === 'POST' && url.pathname === '/callback') {
+    // GET or POST /callback - Permission response from ntfy
+    // GET is used by 'view' actions (opens in browser), POST by 'http' actions
+    if ((req.method === 'GET' || req.method === 'POST') && url.pathname === '/callback') {
       const nonce = url.searchParams.get('nonce')
       const response = url.searchParams.get('response')
       
       // Validate required params
       if (!nonce || !response) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' })
-        res.end('Missing required parameters')
+        res.writeHead(400, { 'Content-Type': 'text/html' })
+        res.end(htmlResponse('Error', 'Missing required parameters', false))
         return
       }
       
       // Validate response value
       if (!VALID_RESPONSES.includes(response)) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' })
-        res.end('Invalid response value')
+        res.writeHead(400, { 'Content-Type': 'text/html' })
+        res.end(htmlResponse('Error', 'Invalid response value', false))
         return
       }
       
       // Validate and consume nonce
       const payload = consumeNonce(nonce)
       if (!payload) {
-        res.writeHead(401, { 'Content-Type': 'text/plain' })
-        res.end('Invalid or expired nonce')
+        res.writeHead(401, { 'Content-Type': 'text/html' })
+        res.end(htmlResponse('Error', 'Invalid or expired nonce', false))
         return
       }
       
       // Forward to session
       const sent = sendToSession(payload.sessionId, payload.permissionId, response)
       if (sent) {
-        res.writeHead(200, { 'Content-Type': 'text/plain' })
-        res.end('OK')
+        const actionLabel = response === 'once' ? 'Allowed (once)' : response === 'always' ? 'Allowed (always)' : 'Rejected'
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end(htmlResponse('Done', actionLabel, true))
       } else {
-        res.writeHead(503, { 'Content-Type': 'text/plain' })
-        res.end('Session not connected')
+        res.writeHead(503, { 'Content-Type': 'text/html' })
+        res.end(htmlResponse('Error', 'Session not connected', false))
       }
       return
     }

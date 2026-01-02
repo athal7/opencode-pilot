@@ -171,11 +171,11 @@ test_permission_notification_has_reject_action() {
   }
 }
 
-test_permission_notification_uses_http_action_type() {
-  # ntfy actions should be HTTP type for callbacks
-  grep -q '"http"' "$PLUGIN_DIR/notifier.js" || \
-  grep -q "'http'" "$PLUGIN_DIR/notifier.js" || {
-    echo "HTTP action type not found in notifier.js"
+test_permission_notification_uses_view_action_type() {
+  # ntfy actions should be view type for callbacks (opens in browser, request comes from phone)
+  grep -q '"view"' "$PLUGIN_DIR/notifier.js" || \
+  grep -q "'view'" "$PLUGIN_DIR/notifier.js" || {
+    echo "view action type not found in notifier.js"
     return 1
   }
 }
@@ -307,7 +307,7 @@ for test_func in \
   test_permission_notification_has_allow_once_action \
   test_permission_notification_has_allow_always_action \
   test_permission_notification_has_reject_action \
-  test_permission_notification_uses_http_action_type \
+  test_permission_notification_uses_view_action_type \
   test_permission_notification_uses_callback_url \
   test_permission_notification_includes_nonce \
   test_permission_notification_includes_response_param \
