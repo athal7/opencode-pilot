@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+#
+# opencode-ntfy - CLI for opencode-ntfy plugin management
+#
+set -euo pipefail
+
+PLUGIN_NAME="opencode-ntfy"
+OPENCODE_CONFIG_DIR="$HOME/.config/opencode"
+PLUGIN_DEST="$OPENCODE_CONFIG_DIR/plugins/$PLUGIN_NAME"
+CONFIG_FILE="$OPENCODE_CONFIG_DIR/opencode.json"
+
+# Find plugin source - check Homebrew first, then local
+find_plugin_source() {
+  # Homebrew install
+  local brew_prefix
+  if brew_prefix="$(brew --prefix opencode-ntfy 2>/dev/null)"; then
+    if [[ -d "$brew_prefix/lib/opencode-ntfy/plugin" ]]; then
+      echo "$brew_prefix/lib/opencode-ntfy/plugin"
+      return 0
+    fi
+  fi
+  
+  # Local development (script is in bin/, plugin is in plugin/)
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -d "$script_dir/../plugin" ]]; then
+    echo "$script_dir/../plugin"
+    return 0
+  fi
+  
+  return 1
+}
+
+cmd_setup() {
+  echo "Setting up $PLUGIN_NAME..."
+  echo ""
+  
+  # Find source
+  local plugin_source
+  if ! plugin_source="$(find_plugin_source)"; then
+    echo "ERROR: Could not find plugin source files"
+    echo "Install via: brew install athal7/tap/opencode-ntfy"
+    exit 1
+  fi
+  
+  echo "Source: $plugin_source"
+  echo "Destination: $PLUGIN_DEST"
+  echo ""
+  
+  # Copy plugin files
+  mkdir -p "$OPENCODE_CONFIG_DIR/plugins"
+  rm -rf "$PLUGIN_DEST"
+  cp -r "$plugin_source" "$PLUGIN_DEST"
+  echo "Plugin files copied."
+  
+  # Update opencode.json
+  if [[ -f "$CONFIG_FILE" ]]; then
+    if grep -q "plugins/$PLUGIN_NAME" "$CONFIG_FILE" 2>/dev/null; then
+      echo "Plugin already in opencode.json"
+    else
+      # Add plugin to existing config
+      node -e "
+        const fs = require('fs');
+        const config = JSON.parse(fs.readFileSync('$CONFIG_FILE', 'utf8'));
+        config.plugin = config.plugin || [];
+        if (!config.plugin.some(p => p.includes('plugins/$PLUGIN_NAME'))) {
+          config.plugin.push('$PLUGIN_DEST');
+        }
+        fs.writeFileSync('$CONFIG_FILE', JSON.stringify(config, null, 2) + '\n');
+      "
+      echo "Added plugin to opencode.json"
+    fi
+  else
+    mkdir -p "$OPENCODE_CONFIG_DIR"
+    echo '{"plugin": ["'"$PLUGIN_DEST"'"]}' | node -e "
+      const fs = require('fs');
+      let input = '';
+      process.stdin.on('data', d => input += d);
+      process.stdin.on('end', () => {
+        fs.writeFileSync('$CONFIG_FILE', JSON.stringify(JSON.parse(input), null, 2) + '\n');
+      });
+    "
+    echo "Created opencode.json with plugin configured"
+  fi
+  
+  # Start service (Homebrew only)
+  if brew --prefix opencode-ntfy &>/dev/null; then
+    echo ""
+    echo "Starting callback service..."
+    brew services restart opencode-ntfy
+    echo ""
+    echo "Service started. View logs with:"
+    echo "  tail -f \$(brew --prefix)/var/log/opencode-ntfy.log"
+  fi
+  
+  echo ""
+  echo "Setup complete!"
+  echo ""
+  echo "Required: Set NTFY_TOPIC in your environment or opencode.json"
+  echo "Optional: Set NTFY_CALLBACK_HOST for interactive permissions"
+}
+
+cmd_status() {
+  echo "opencode-ntfy status"
+  echo "===================="
+  echo ""
+  
+  # Plugin installed?
+  if [[ -d "$PLUGIN_DEST" ]]; then
+    echo "Plugin: installed at $PLUGIN_DEST"
+  else
+    echo "Plugin: NOT INSTALLED (run: opencode-ntfy setup)"
+  fi
+  
+  # Config?
+  if [[ -f "$CONFIG_FILE" ]] && grep -q "plugins/$PLUGIN_NAME" "$CONFIG_FILE" 2>/dev/null; then
+    echo "Config: plugin registered in opencode.json"
+  else
+    echo "Config: plugin NOT in opencode.json"
+  fi
+  
+  # Service running?
+  if brew services list 2>/dev/null | grep -q "opencode-ntfy.*started"; then
+    echo "Service: running"
+  else
+    echo "Service: not running (run: brew services start opencode-ntfy)"
+  fi
+  
+  # Environment
+  echo ""
+  echo "Environment:"
+  echo "  NTFY_TOPIC: ${NTFY_TOPIC:-<not set>}"
+  echo "  NTFY_SERVER: ${NTFY_SERVER:-https://ntfy.sh (default)}"
+  echo "  NTFY_CALLBACK_HOST: ${NTFY_CALLBACK_HOST:-<not set>}"
+  echo "  NTFY_CALLBACK_PORT: ${NTFY_CALLBACK_PORT:-4097 (default)}"
+}
+
+cmd_help() {
+  cat <<EOF
+opencode-ntfy - ntfy notification plugin for OpenCode
+
+Usage:
+  opencode-ntfy <command>
+
+Commands:
+  setup     Copy plugin files and start service
+  status    Show installation and service status
+  help      Show this help message
+
+Examples:
+  opencode-ntfy setup    # Initial setup after brew install
+  opencode-ntfy status   # Check if everything is configured
+EOF
+}
+
+# Main
+case "${1:-help}" in
+  setup)  cmd_setup ;;
+  status) cmd_status ;;
+  help|--help|-h) cmd_help ;;
+  *)
+    echo "Unknown command: $1"
+    echo ""
+    cmd_help
+    exit 1
+    ;;
+esac
