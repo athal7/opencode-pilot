@@ -72,6 +72,7 @@ export function loadConfig() {
     errorDebounceMs: getInt('NTFY_ERROR_DEBOUNCE_MS', 'errorDebounceMs', 60000),
     retryNotifyFirst: getBool('NTFY_RETRY_NOTIFY_FIRST', 'retryNotifyFirst', true),
     retryNotifyAfter: getInt('NTFY_RETRY_NOTIFY_AFTER', 'retryNotifyAfter', 3),
+    idleNotify: getBool('NTFY_IDLE_NOTIFY', 'idleNotify', true),
   }
 }
 
