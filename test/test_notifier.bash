@@ -241,6 +241,14 @@ test_permission_notification_truncates_long_commands() {
   }
 }
 
+test_truncate_handles_falsy_input() {
+  # truncate() should return empty string for falsy input, not undefined
+  grep -q "return ''" "$PLUGIN_DIR/notifier.js" || {
+    echo "truncate() should return empty string for falsy input"
+    return 1
+  }
+}
+
 test_permission_notification_clears_on_action() {
   # Actions should clear the notification when clicked
   grep -q "clear.*true\|true.*clear" "$PLUGIN_DIR/notifier.js" || {
@@ -304,6 +312,7 @@ for test_func in \
   test_permission_notification_includes_repo_in_title \
   test_permission_notification_includes_command \
   test_permission_notification_truncates_long_commands \
+  test_truncate_handles_falsy_input \
   test_permission_notification_clears_on_action
 do
   run_test "${test_func#test_}" "$test_func"

@@ -7,10 +7,13 @@ const MAX_COMMAND_LENGTH = 100
  * Truncate a string to a maximum length, adding ellipsis if needed
  * @param {string} str - String to truncate
  * @param {number} maxLength - Maximum length
- * @returns {string} Truncated string
+ * @returns {string} Truncated string (empty string if input is falsy)
  */
 function truncate(str, maxLength) {
-  if (!str || str.length <= maxLength) {
+  if (!str) {
+    return ''
+  }
+  if (str.length <= maxLength) {
     return str
   }
   return str.slice(0, maxLength - 3) + '...'
