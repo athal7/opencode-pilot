@@ -5,7 +5,7 @@
 // - Session goes idle after delay
 // - Errors or retries occur
 //
-// Configuration via opencode.json "ntfy" key or environment variables.
+// Configuration via ~/.config/opencode-ntfy/config.json or environment variables.
 // See README.md for full configuration options.
 
 import { basename } from 'path'
@@ -20,7 +20,7 @@ import {
   setPermissionHandler,
 } from './service-client.js'
 
-// Load configuration from opencode.json and environment
+// Load configuration from config file and environment
 const config = loadConfig()
 
 export const Notify = async ({ $, client, directory }) => {
@@ -88,12 +88,52 @@ export const Notify = async ({ $, client, directory }) => {
   // Use directory from OpenCode (the actual repo), not process.cwd() (may be temp devcontainer dir)
   const repoName = basename(directory) || 'unknown'
   let idleTimer = null
+  let retryCount = 0
+  let lastErrorTime = 0
 
   return {
     event: async ({ event }) => {
-      // Handle session status events (idle notifications)
+      // Debug logging for event discovery (when NTFY_DEBUG is set)
+      if (process.env.NTFY_DEBUG) {
+        console.log(`[opencode-ntfy] Event: ${event.type}`, JSON.stringify(event.properties))
+      }
+
+      // Handle session status events (idle, busy, retry notifications)
       if (event.type === 'session.status') {
         const status = event.properties?.status?.type
+        
+        // Handle retry status
+        if (status === 'retry') {
+          retryCount++
+          
+          // Check if we should notify based on config
+          const shouldNotifyFirst = config.retryNotifyFirst && retryCount === 1
+          const shouldNotifyAfterN = config.retryNotifyAfter > 0 && retryCount === config.retryNotifyAfter
+          
+          if (shouldNotifyFirst || shouldNotifyAfterN) {
+            await sendNotification({
+              server: config.server,
+              topic: config.topic,
+              title: `Retry (${repoName})`,
+              message: `Retry attempt #${retryCount}`,
+              priority: 4,
+              tags: ['repeat'],
+              authToken: config.authToken,
+            })
+            console.log(`[opencode-ntfy] Retry notification sent (#${retryCount})`)
+          } else {
+            console.log(`[opencode-ntfy] Retry #${retryCount} suppressed (notifyFirst=${config.retryNotifyFirst}, notifyAfter=${config.retryNotifyAfter})`)
+          }
+          return
+        }
+        
+        // Reset retry counter on any non-retry status
+        if (retryCount > 0) {
+          console.log(`[opencode-ntfy] Retry counter reset (was ${retryCount})`)
+          retryCount = 0
+        }
+        
+        // Handle idle status
         if (status === 'idle' && !idleTimer) {
           idleTimer = setTimeout(async () => {
             // Clear timer reference immediately to prevent race conditions
@@ -109,6 +149,41 @@ export const Notify = async ({ $, client, directory }) => {
         } else if (status === 'busy' && idleTimer) {
           clearTimeout(idleTimer)
           idleTimer = null
+        }
+      }
+      
+      // Handle session.error events (debounced error notifications)
+      if (event.type === 'session.error') {
+        if (!config.errorNotify) {
+          return
+        }
+        
+        const now = Date.now()
+        const timeSinceLastError = now - lastErrorTime
+        
+        if (lastErrorTime === 0 || timeSinceLastError >= config.errorDebounceMs) {
+          lastErrorTime = now
+          
+          // Extract error message with fallback chain
+          const errorMessage = 
+            event.properties?.error?.message ||
+            event.properties?.message ||
+            event.properties?.error?.code ||
+            event.properties?.error?.type ||
+            'Unknown error'
+          
+          await sendNotification({
+            server: config.server,
+            topic: config.topic,
+            title: `Error (${repoName})`,
+            message: errorMessage,
+            priority: 5,
+            tags: ['warning'],
+            authToken: config.authToken,
+          })
+          console.log(`[opencode-ntfy] Error notification sent: ${errorMessage}`)
+        } else {
+          console.log(`[opencode-ntfy] Error debounced (${Math.round(timeSinceLastError / 1000)}s since last, window=${config.errorDebounceMs / 1000}s)`)
         }
       }
       
@@ -154,8 +229,6 @@ export const Notify = async ({ $, client, directory }) => {
           console.warn(`[opencode-ntfy] Failed to send permission notification: ${error.message}`)
         }
       }
-      
-      // TODO: Issue #7 - Handle error and retry events
     },
     
     // Cleanup on shutdown

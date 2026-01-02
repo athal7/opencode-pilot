@@ -1,42 +1,38 @@
 // Configuration management for opencode-ntfy
-// Reads from opencode.json "ntfy" key, with env var overrides
+// Reads from ~/.config/opencode-ntfy/config.json, with env var overrides
 //
-// Example opencode.json:
+// Example config file (~/.config/opencode-ntfy/config.json):
 // {
-//   "plugin": ["~/.config/opencode/plugins/opencode-ntfy"],
-//   "ntfy": {
-//     "topic": "my-secret-topic",
-//     "server": "https://ntfy.sh",
-//     "token": "tk_xxx",
-//     "callbackHost": "myhost.ts.net",
-//     "callbackPort": 4097,
-//     "idleDelayMs": 300000
-//   }
+//   "topic": "my-secret-topic",
+//   "server": "https://ntfy.sh",
+//   "token": "tk_xxx",
+//   "callbackHost": "myhost.ts.net",
+//   "callbackPort": 4097,
+//   "idleDelayMs": 300000
 // }
 
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-const OPENCODE_CONFIG_PATH = join(homedir(), '.config', 'opencode', 'opencode.json')
+const CONFIG_PATH = join(homedir(), '.config', 'opencode-ntfy', 'config.json')
 
 /**
- * Load configuration from opencode.json and environment
- * Priority: env vars > opencode.json "ntfy" key > defaults
+ * Load configuration from config file and environment
+ * Priority: env vars > config.json > defaults
  */
 export function loadConfig() {
-  // Load opencode.json if it exists
+  // Load config.json if it exists
   let fileConfig = {}
-  if (existsSync(OPENCODE_CONFIG_PATH)) {
+  if (existsSync(CONFIG_PATH)) {
     try {
-      const content = readFileSync(OPENCODE_CONFIG_PATH, 'utf8')
-      const opencode = JSON.parse(content)
-      fileConfig = opencode.ntfy || {}
+      const content = readFileSync(CONFIG_PATH, 'utf8')
+      fileConfig = JSON.parse(content)
       if (Object.keys(fileConfig).length > 0) {
-        console.log('[opencode-ntfy] Loaded config from opencode.json')
+        console.log('[opencode-ntfy] Loaded config from ~/.config/opencode-ntfy/config.json')
       }
     } catch (err) {
-      console.warn(`[opencode-ntfy] Failed to parse opencode.json: ${err.message}`)
+      console.warn(`[opencode-ntfy] Failed to parse config.json: ${err.message}`)
     }
   }
 

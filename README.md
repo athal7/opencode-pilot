@@ -22,15 +22,20 @@ curl -fsSL https://raw.githubusercontent.com/athal7/opencode-ntfy/main/install.s
 
 ## Configuration
 
-Configure in `~/.config/opencode/opencode.json` under the `ntfy` key:
+Add the plugin to your `~/.config/opencode/opencode.json`:
 
 ```json
 {
-  "plugin": ["~/.config/opencode/plugins/opencode-ntfy"],
-  "ntfy": {
-    "topic": "your-secret-topic",
-    "callbackHost": "your-machine.tailnet.ts.net"
-  }
+  "plugin": ["~/.config/opencode/plugins/opencode-ntfy"]
+}
+```
+
+Then create a config file at `~/.config/opencode-ntfy/config.json`:
+
+```json
+{
+  "topic": "your-secret-topic",
+  "callbackHost": "your-machine.tailnet.ts.net"
 }
 ```
 

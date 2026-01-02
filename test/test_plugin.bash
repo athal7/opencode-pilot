@@ -344,6 +344,126 @@ test_index_handles_permission_updated() {
 }
 
 # =============================================================================
+# Retry Event Handling Tests (Issue #7)
+# =============================================================================
+
+test_handles_retry_status() {
+  # Verify retry status is handled within session.status events
+  grep -q "retry" "$PLUGIN_DIR/index.js" || {
+    echo "retry status handling not found"
+    return 1
+  }
+}
+
+test_tracks_retry_count() {
+  # Verify retry counter is tracked
+  grep -q "retryCount" "$PLUGIN_DIR/index.js" || {
+    echo "retryCount variable not found"
+    return 1
+  }
+}
+
+test_uses_retry_notify_first_config() {
+  # Verify retryNotifyFirst config is used
+  grep -q "retryNotifyFirst" "$PLUGIN_DIR/index.js" || {
+    echo "retryNotifyFirst config not used"
+    return 1
+  }
+}
+
+test_uses_retry_notify_after_config() {
+  # Verify retryNotifyAfter config is used
+  grep -q "retryNotifyAfter" "$PLUGIN_DIR/index.js" || {
+    echo "retryNotifyAfter config not used"
+    return 1
+  }
+}
+
+test_sends_retry_notification_with_priority() {
+  # Verify retry notifications use high priority (4)
+  grep -q "priority.*4\|4.*priority" "$PLUGIN_DIR/index.js" || {
+    echo "High priority (4) not found for retry notifications"
+    return 1
+  }
+}
+
+# =============================================================================
+# Error Event Handling Tests (Issue #7)
+# =============================================================================
+
+test_handles_session_error() {
+  # Verify session.error events are handled
+  grep -q "session\.error" "$PLUGIN_DIR/index.js" || {
+    echo "session.error event handling not found"
+    return 1
+  }
+}
+
+test_uses_error_notify_config() {
+  # Verify errorNotify config is used
+  grep -q "errorNotify" "$PLUGIN_DIR/index.js" || {
+    echo "errorNotify config not used"
+    return 1
+  }
+}
+
+test_uses_error_debounce_config() {
+  # Verify errorDebounceMs config is used
+  grep -q "errorDebounceMs" "$PLUGIN_DIR/index.js" || {
+    echo "errorDebounceMs config not used"
+    return 1
+  }
+}
+
+test_tracks_last_error_time() {
+  # Verify last error timestamp is tracked for debouncing
+  grep -q "lastErrorTime" "$PLUGIN_DIR/index.js" || {
+    echo "lastErrorTime variable not found"
+    return 1
+  }
+}
+
+test_sends_error_notification_with_urgent_priority() {
+  # Verify error notifications use urgent priority (5)
+  grep -q "priority.*5\|5.*priority" "$PLUGIN_DIR/index.js" || {
+    echo "Urgent priority (5) not found for error notifications"
+    return 1
+  }
+}
+
+# =============================================================================
+# Counter Reset Tests (Issue #7)
+# =============================================================================
+
+test_resets_retry_counter_on_status_change() {
+  # Verify retry counter is reset when status changes
+  grep -q "retryCount.*=.*0\|retryCount = 0" "$PLUGIN_DIR/index.js" || {
+    echo "Retry counter reset not found"
+    return 1
+  }
+}
+
+# =============================================================================
+# Notification Suppression Logging Tests (Issue #7)
+# =============================================================================
+
+test_logs_retry_suppression() {
+  # Verify logging when retry notifications are suppressed
+  grep -q "suppressed\|Retry.*suppressed\|retry.*suppressed" "$PLUGIN_DIR/index.js" || {
+    echo "Retry suppression logging not found"
+    return 1
+  }
+}
+
+test_logs_error_debounce() {
+  # Verify logging when error notifications are debounced
+  grep -q "debounced\|Debounced\|debounce" "$PLUGIN_DIR/index.js" || {
+    echo "Error debounce logging not found"
+    return 1
+  }
+}
+
+# =============================================================================
 # OpenCode Runtime Integration Tests
 # =============================================================================
 # These tests verify the plugin doesn't hang opencode on startup and
@@ -567,6 +687,51 @@ for test_func in \
   test_index_imports_service_client \
   test_index_connects_to_service \
   test_index_handles_permission_updated
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Retry Event Handling Tests (Issue #7):"
+
+for test_func in \
+  test_handles_retry_status \
+  test_tracks_retry_count \
+  test_uses_retry_notify_first_config \
+  test_uses_retry_notify_after_config \
+  test_sends_retry_notification_with_priority
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Error Event Handling Tests (Issue #7):"
+
+for test_func in \
+  test_handles_session_error \
+  test_uses_error_notify_config \
+  test_uses_error_debounce_config \
+  test_tracks_last_error_time \
+  test_sends_error_notification_with_urgent_priority
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Counter Reset Tests (Issue #7):"
+
+for test_func in \
+  test_resets_retry_counter_on_status_change
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Notification Suppression Logging Tests (Issue #7):"
+
+for test_func in \
+  test_logs_retry_suppression \
+  test_logs_error_debounce
 do
   run_test "${test_func#test_}" "$test_func"
 done

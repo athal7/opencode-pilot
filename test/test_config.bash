@@ -61,16 +61,9 @@ test_config_reads_file() {
   }
 }
 
-test_config_uses_opencode_json() {
-  grep -q "opencode.json\|OPENCODE_CONFIG" "$PLUGIN_DIR/config.js" || {
-    echo "opencode.json config path not found in config.js"
-    return 1
-  }
-}
-
-test_config_reads_ntfy_key() {
-  grep -q "\.ntfy\|ntfy" "$PLUGIN_DIR/config.js" || {
-    echo "ntfy key reading not found in config.js"
+test_config_uses_separate_config_file() {
+  grep -q "opencode-ntfy.*config.json\|CONFIG_PATH" "$PLUGIN_DIR/config.js" || {
+    echo "Separate config file path not found in config.js"
     return 1
   }
 }
@@ -291,8 +284,7 @@ echo "Implementation Tests:"
 
 for test_func in \
   test_config_reads_file \
-  test_config_uses_opencode_json \
-  test_config_reads_ntfy_key \
+  test_config_uses_separate_config_file \
   test_config_parses_json \
   test_config_supports_env_vars \
   test_config_has_all_fields \
