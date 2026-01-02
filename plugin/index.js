@@ -20,7 +20,7 @@ import {
   setPermissionHandler,
 } from './service-client.js'
 
-// Load configuration from opencode.json and environment
+// Load configuration from config file and environment
 const config = loadConfig()
 
 export const Notify = async ({ $, client, directory }) => {
