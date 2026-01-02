@@ -1,6 +1,24 @@
 // ntfy HTTP client for sending notifications
 // Implements Issue #3: Notifier module
 
+const MAX_COMMAND_LENGTH = 100
+
+/**
+ * Truncate a string to a maximum length, adding ellipsis if needed
+ * @param {string} str - String to truncate
+ * @param {number} maxLength - Maximum length
+ * @returns {string} Truncated string (empty string if input is falsy)
+ */
+function truncate(str, maxLength) {
+  if (!str) {
+    return ''
+  }
+  if (str.length <= maxLength) {
+    return str
+  }
+  return str.slice(0, maxLength - 3) + '...'
+}
+
 /**
  * Build headers for ntfy requests
  * @param {string} [authToken] - Optional ntfy access token for Bearer auth
@@ -66,8 +84,9 @@ export async function sendNotification({ server, topic, title, message, priority
  * @param {string} options.topic - ntfy topic name
  * @param {string} options.callbackUrl - Base URL for callbacks
  * @param {string} options.nonce - Single-use nonce for callback authentication
- * @param {string} options.tool - Tool requesting permission
- * @param {string} options.description - Permission description
+ * @param {string} options.tool - Tool requesting permission (e.g., "bash", "edit")
+ * @param {string} options.command - The actual command or pattern being requested
+ * @param {string} options.repoName - Repository/directory name for context
  * @param {string} [options.authToken] - Optional ntfy access token for protected topics
  */
 export async function sendPermissionNotification({
@@ -76,13 +95,15 @@ export async function sendPermissionNotification({
   callbackUrl,
   nonce,
   tool,
-  description,
+  command,
+  repoName,
   authToken,
 }) {
+  const truncatedCommand = truncate(command, MAX_COMMAND_LENGTH)
   const body = {
     topic,
-    title: 'OpenCode: Permission',
-    message: `${tool}: ${description}`,
+    title: `Approve? (${repoName})`,
+    message: `${tool}: ${truncatedCommand}`,
     priority: 4,
     tags: ['lock'],
     actions: [
