@@ -85,7 +85,8 @@ export const Notify = async ({ $, client, directory }) => {
     console.log('[opencode-ntfy] Read-only mode (set callbackHost for interactive permissions)')
   }
 
-  const dir = basename(process.cwd())
+  // Use directory from OpenCode (the actual repo), not process.cwd() (may be temp devcontainer dir)
+  const repoName = basename(directory) || 'unknown'
   let idleTimer = null
   let retryCount = 0
   let lastErrorTime = 0
@@ -140,8 +141,8 @@ export const Notify = async ({ $, client, directory }) => {
             await sendNotification({
               server: config.server,
               topic: config.topic,
-              title: 'OpenCode',
-              message: dir,
+              title: `Idle (${repoName})`,
+              message: 'Session waiting for input',
               authToken: config.authToken,
             })
           }, config.idleDelayMs)
@@ -200,7 +201,9 @@ export const Notify = async ({ $, client, directory }) => {
         
         const permissionId = permission.id
         const tool = permission.tool || 'Unknown tool'
-        const description = permission.description || 'Permission requested'
+        // Use pattern (the actual command) if available, fall back to description
+        const patterns = permission.pattern || permission.patterns
+        const command = Array.isArray(patterns) ? patterns.join(' ') : (patterns || permission.description || 'Permission requested')
         
         try {
           // Request nonce from service
@@ -216,7 +219,8 @@ export const Notify = async ({ $, client, directory }) => {
             callbackUrl,
             nonce,
             tool,
-            description,
+            command,
+            repoName,
             authToken: config.authToken,
           })
           

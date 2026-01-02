@@ -203,6 +203,30 @@ test_uses_configured_idle_delay() {
   }
 }
 
+test_uses_directory_param_not_process_cwd() {
+  # Should use the directory parameter from OpenCode, not process.cwd()
+  # This ensures devcontainer temp dirs don't show up in notifications
+  grep -q 'directory' "$PLUGIN_DIR/index.js" || {
+    echo "directory parameter not used in index.js"
+    return 1
+  }
+  # Should NOT use process.cwd() for directory name in code (comments are ok)
+  # Look for actual usage like: basename(process.cwd()) or = process.cwd()
+  if grep -E 'basename\(process\.cwd\(\)\)|=\s*process\.cwd\(\)' "$PLUGIN_DIR/index.js"; then
+    echo "Should not use process.cwd() for directory - use directory param instead"
+    return 1
+  fi
+}
+
+test_idle_notification_shows_repo_context() {
+  # Idle notification should include repo name for context
+  # Title should be "Idle (repo)" not just "OpenCode"
+  grep -q 'Idle' "$PLUGIN_DIR/index.js" || {
+    echo "Idle notification title should include 'Idle'"
+    return 1
+  }
+}
+
 # =============================================================================
 # Logging Tests
 # =============================================================================
@@ -622,7 +646,9 @@ for test_func in \
   test_uses_cleartimeout_for_busy \
   test_imports_send_notification_from_notifier \
   test_uses_configured_server_and_topic \
-  test_uses_configured_idle_delay
+  test_uses_configured_idle_delay \
+  test_uses_directory_param_not_process_cwd \
+  test_idle_notification_shows_repo_context
 do
   run_test "${test_func#test_}" "$test_func"
 done
