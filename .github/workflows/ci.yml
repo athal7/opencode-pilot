@@ -50,7 +50,7 @@ jobs:
           node-version: '20'
 
       - name: Install Node.js dependencies
-        run: npm ci
+        run: npm install
 
       - name: Run semantic-release
         id: semantic
