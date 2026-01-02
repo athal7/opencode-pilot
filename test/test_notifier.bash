@@ -209,10 +209,34 @@ test_permission_notification_uses_high_priority() {
   }
 }
 
-test_permission_notification_has_lock_emoji_title() {
-  # Title should include lock emoji for permission requests
-  grep -q "Permission" "$PLUGIN_DIR/notifier.js" || {
-    echo "Permission title not found in notifier.js"
+test_permission_notification_has_approve_title() {
+  # Title should ask "Approve?" for clarity on iOS notifications
+  grep -q "Approve" "$PLUGIN_DIR/notifier.js" || {
+    echo "'Approve' not found in permission notification title"
+    return 1
+  }
+}
+
+test_permission_notification_includes_repo_in_title() {
+  # Title should include repo/directory name for context
+  grep -q "repoName\|repo" "$PLUGIN_DIR/notifier.js" || {
+    echo "repo/repoName parameter not used in notifier.js"
+    return 1
+  }
+}
+
+test_permission_notification_includes_command() {
+  # Message should include the actual command/pattern, not just description
+  grep -q "command\|pattern" "$PLUGIN_DIR/notifier.js" || {
+    echo "command/pattern parameter not found in notifier.js"
+    return 1
+  }
+}
+
+test_permission_notification_truncates_long_commands() {
+  # Should have truncation logic for long commands
+  grep -q "truncate\|slice\|substring\|\.\.\\." "$PLUGIN_DIR/notifier.js" || {
+    echo "Command truncation logic not found in notifier.js"
     return 1
   }
 }
@@ -276,7 +300,10 @@ for test_func in \
   test_permission_notification_includes_nonce \
   test_permission_notification_includes_response_param \
   test_permission_notification_uses_high_priority \
-  test_permission_notification_has_lock_emoji_title \
+  test_permission_notification_has_approve_title \
+  test_permission_notification_includes_repo_in_title \
+  test_permission_notification_includes_command \
+  test_permission_notification_truncates_long_commands \
   test_permission_notification_clears_on_action
 do
   run_test "${test_func#test_}" "$test_func"
