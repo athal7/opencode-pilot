@@ -495,12 +495,43 @@ can_run_integration_tests() {
     return 1
   fi
   
-  # Check plugin is installed
-  if [[ ! -f "$HOME/.config/opencode/plugins/opencode-ntfy/index.js" ]]; then
+  # Check plugin is installed (use REAL_HOME since we may have changed HOME)
+  local plugin_path="${REAL_HOME:-$HOME}/.config/opencode/plugins/opencode-ntfy/index.js"
+  if [[ ! -f "$plugin_path" ]]; then
     return 1
   fi
   
   return 0
+}
+
+# Setup isolated environment for integration tests
+# Uses temp directory for opencode data while symlinking config from real HOME
+setup_integration_env() {
+  REAL_HOME="$HOME"
+  INTEGRATION_TEST_DIR=$(mktemp -d)
+  export HOME="$INTEGRATION_TEST_DIR"
+  
+  # Create necessary directories
+  mkdir -p "$HOME/.config"
+  mkdir -p "$HOME/.local/share"
+  
+  # Symlink opencode config (contains plugin registrations and auth)
+  ln -s "$REAL_HOME/.config/opencode" "$HOME/.config/opencode"
+  
+  # Symlink opencode-ntfy config
+  if [[ -d "$REAL_HOME/.config/opencode-ntfy" ]]; then
+    ln -s "$REAL_HOME/.config/opencode-ntfy" "$HOME/.config/opencode-ntfy"
+  fi
+}
+
+# Cleanup isolated environment after integration tests
+cleanup_integration_env() {
+  if [[ -n "${INTEGRATION_TEST_DIR:-}" ]] && [[ -d "$INTEGRATION_TEST_DIR" ]]; then
+    rm -rf "$INTEGRATION_TEST_DIR"
+  fi
+  if [[ -n "${REAL_HOME:-}" ]]; then
+    export HOME="$REAL_HOME"
+  fi
 }
 
 # Cross-platform timeout wrapper
@@ -521,9 +552,11 @@ run_opencode() {
 
 test_opencode_starts_within_timeout() {
   if ! can_run_integration_tests; then
-    echo "SKIP: opencode integration tests disabled"
+    echo "SKIP: opencode not installed or plugin not configured"
     return 0
   fi
+  
+  setup_integration_env
   
   # CRITICAL: Verify opencode starts within 10 seconds
   # This catches plugin initialization hangs that would block startup indefinitely.
@@ -537,6 +570,8 @@ test_opencode_starts_within_timeout() {
   
   end_time=$(date +%s)
   elapsed=$((end_time - start_time))
+  
+  cleanup_integration_env
   
   if [[ $exit_code -ne 0 ]]; then
     # Check if it was a timeout (exit code 142 = SIGALRM)
@@ -561,16 +596,21 @@ test_opencode_starts_within_timeout() {
 
 test_opencode_plugin_loads() {
   if ! can_run_integration_tests; then
-    echo "SKIP: opencode integration tests disabled"
+    echo "SKIP: opencode not installed or plugin not configured"
     return 0
   fi
+  
+  setup_integration_env
   
   # Plugin should load without errors - check opencode doesn't report plugin failures
   local output
   output=$(run_opencode "Say hello" 30) || {
+    cleanup_integration_env
     echo "opencode run failed: $output"
     return 1
   }
+  
+  cleanup_integration_env
   
   # Check that output doesn't contain plugin error messages
   if echo "$output" | grep -qi "plugin.*error\|failed to load"; then
@@ -584,9 +624,11 @@ test_opencode_plugin_loads() {
 
 test_opencode_ntfy_disabled_without_topic() {
   if ! can_run_integration_tests; then
-    echo "SKIP: opencode integration tests disabled"
+    echo "SKIP: opencode not installed or plugin not configured"
     return 0
   fi
+  
+  setup_integration_env
   
   # Without NTFY_TOPIC, plugin should disable gracefully (not crash)
   # Unset NTFY_TOPIC temporarily
@@ -601,6 +643,8 @@ test_opencode_ntfy_disabled_without_topic() {
   if [[ -n "$old_topic" ]]; then
     export NTFY_TOPIC="$old_topic"
   fi
+  
+  cleanup_integration_env
   
   if [[ $exit_code -ne 0 ]]; then
     echo "opencode failed without NTFY_TOPIC: $output"
@@ -758,7 +802,7 @@ done
 # Removed notification suppression logging tests - console output is now fully suppressed
 
 echo ""
-echo "OpenCode Runtime Integration Tests (CI=${CI:-false}):"
+echo "OpenCode Runtime Integration Tests:"
 
 for test_func in \
   test_opencode_starts_within_timeout \

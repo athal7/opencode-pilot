@@ -100,6 +100,49 @@ cmd_setup() {
   echo "Optional: Set NTFY_CALLBACK_HOST for interactive permissions"
 }
 
+NTFY_CONFIG_FILE="$HOME/.config/opencode-ntfy/config.json"
+
+# Read a value from config file (JSON)
+read_config_value() {
+  local key="$1"
+  if [[ -f "$NTFY_CONFIG_FILE" ]]; then
+    node -e "
+      const fs = require('fs');
+      try {
+        const config = JSON.parse(fs.readFileSync('$NTFY_CONFIG_FILE', 'utf8'));
+        if (config['$key'] !== undefined && config['$key'] !== '') {
+          console.log(config['$key']);
+        }
+      } catch (e) {}
+    " 2>/dev/null
+  fi
+}
+
+# Get effective config value (env var > config file > default)
+get_config() {
+  local env_var="$1"
+  local config_key="$2"
+  local default_value="${3:-}"
+  
+  # Check env var first
+  local env_value="${!env_var:-}"
+  if [[ -n "$env_value" ]]; then
+    echo "$env_value"
+    return
+  fi
+  
+  # Check config file
+  local file_value
+  file_value=$(read_config_value "$config_key")
+  if [[ -n "$file_value" ]]; then
+    echo "$file_value"
+    return
+  fi
+  
+  # Return default
+  echo "$default_value"
+}
+
 cmd_status() {
   echo "opencode-ntfy status"
   echo "===================="
@@ -126,13 +169,39 @@ cmd_status() {
     echo "Service: not running (run: brew services start opencode-ntfy)"
   fi
   
-  # Environment
+  # Configuration (from config file and/or environment)
   echo ""
-  echo "Environment:"
-  echo "  NTFY_TOPIC: ${NTFY_TOPIC:-<not set>}"
-  echo "  NTFY_SERVER: ${NTFY_SERVER:-https://ntfy.sh (default)}"
-  echo "  NTFY_CALLBACK_HOST: ${NTFY_CALLBACK_HOST:-<not set>}"
-  echo "  NTFY_CALLBACK_PORT: ${NTFY_CALLBACK_PORT:-4097 (default)}"
+  echo "Configuration:"
+  
+  local topic server callback_host callback_port
+  topic=$(get_config "NTFY_TOPIC" "topic" "")
+  server=$(get_config "NTFY_SERVER" "server" "https://ntfy.sh")
+  callback_host=$(get_config "NTFY_CALLBACK_HOST" "callbackHost" "")
+  callback_port=$(get_config "NTFY_CALLBACK_PORT" "callbackPort" "4097")
+  
+  if [[ -n "$topic" ]]; then
+    echo "  topic: $topic"
+  else
+    echo "  topic: <not set>"
+  fi
+  
+  echo "  server: $server"
+  
+  if [[ -n "$callback_host" ]]; then
+    echo "  callbackHost: $callback_host"
+  else
+    echo "  callbackHost: <not set>"
+  fi
+  
+  echo "  callbackPort: $callback_port"
+  
+  # Show config file status
+  echo ""
+  if [[ -f "$NTFY_CONFIG_FILE" ]]; then
+    echo "Config file: $NTFY_CONFIG_FILE"
+  else
+    echo "Config file: not found ($NTFY_CONFIG_FILE)"
+  fi
 }
 
 cmd_help() {
