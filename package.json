@@ -1,0 +1,15 @@
+{
+  "name": "opencode-ntfy",
+  "private": true,
+  "description": "ntfy notification plugin for OpenCode with interactive permissions",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/athal7/opencode-ntfy.git"
+  },
+  "author": "Andrew Thal <467872+athal7@users.noreply.github.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@semantic-release/github": "^9.2.6",
+    "semantic-release": "^25.0.2"
+  }
+}
