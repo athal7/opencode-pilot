@@ -46,8 +46,9 @@ function buildHeaders(authToken) {
  * @param {number} [options.priority] - Priority (1-5, default 3)
  * @param {string[]} [options.tags] - Emoji tags
  * @param {string} [options.authToken] - Optional ntfy access token for protected topics
+ * @param {Object[]} [options.actions] - Optional action buttons (see ntfy docs)
  */
-export async function sendNotification({ server, topic, title, message, priority, tags, authToken }) {
+export async function sendNotification({ server, topic, title, message, priority, tags, authToken, actions }) {
   const body = {
     topic,
     title,
@@ -60,6 +61,9 @@ export async function sendNotification({ server, topic, title, message, priority
   }
   if (tags && tags.length > 0) {
     body.tags = tags
+  }
+  if (actions && actions.length > 0) {
+    body.actions = actions
   }
 
   try {

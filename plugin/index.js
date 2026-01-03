@@ -23,7 +23,7 @@ import {
 // Load configuration from config file and environment
 const config = loadConfig()
 
-export const Notify = async ({ $, client, directory }) => {
+export const Notify = async ({ $, client, directory, serverUrl }) => {
   if (!config.topic) {
     return {}
   }
@@ -74,12 +74,21 @@ export const Notify = async ({ $, client, directory }) => {
   let retryCount = 0
   let lastErrorTime = 0
   let wasCanceled = false
+  let currentSessionId = null
 
   return {
     event: async ({ event }) => {
       // Skip all notifications if session was canceled (except checking for canceled status itself)
       if (wasCanceled && event.type !== 'session.status') {
         return
+      }
+      
+      // Track session ID from session.created and session.updated events
+      if (event.type === 'session.created' || event.type === 'session.updated') {
+        const eventSessionId = event.properties?.info?.id
+        if (eventSessionId) {
+          currentSessionId = eventSessionId
+        }
       }
 
       // Handle session status events (idle, busy, retry notifications)
@@ -132,12 +141,33 @@ export const Notify = async ({ $, client, directory }) => {
             if (wasCanceled) {
               return
             }
+            
+            // Build "Open Session" action if serverUrl and callbackHost are available
+            // URL format matches OpenCode web UI: {origin}/{directory}/session/{sessionId}
+            let actions
+            if (serverUrl && config.callbackHost && currentSessionId) {
+              try {
+                const url = new URL(serverUrl)
+                url.hostname = config.callbackHost
+                const sessionUrl = `${url.origin}/${repoName}/session/${currentSessionId}`
+                actions = [{
+                  action: 'view',
+                  label: 'Open Session',
+                  url: sessionUrl,
+                  clear: true,
+                }]
+              } catch {
+                // Silently ignore URL parsing errors
+              }
+            }
+            
             await sendNotification({
               server: config.server,
               topic: config.topic,
               title: `Idle (${repoName})`,
               message: 'Session waiting for input',
               authToken: config.authToken,
+              actions,
             })
           }, config.idleDelayMs)
         } else if (status === 'busy' && idleTimer) {

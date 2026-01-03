@@ -127,6 +127,23 @@ test_send_notification_uses_bearer_auth() {
   }
 }
 
+test_send_notification_supports_optional_actions() {
+  # sendNotification should accept optional actions parameter
+  # Check that actions is handled in sendNotification function
+  grep -A 30 "export async function sendNotification" "$PLUGIN_DIR/notifier.js" | grep -q "actions" || {
+    echo "sendNotification should accept optional actions parameter"
+    return 1
+  }
+}
+
+test_send_notification_adds_actions_to_body() {
+  # When actions provided, they should be added to the request body
+  grep -A 30 "export async function sendNotification" "$PLUGIN_DIR/notifier.js" | grep -q "body.actions\|actions.*body" || {
+    echo "sendNotification should add actions to body when provided"
+    return 1
+  }
+}
+
 # =============================================================================
 # sendPermissionNotification Function Tests
 # =============================================================================
@@ -293,7 +310,9 @@ for test_func in \
   test_send_notification_catches_errors \
   test_send_notification_handles_errors_silently \
   test_send_notification_supports_auth_token \
-  test_send_notification_uses_bearer_auth
+  test_send_notification_uses_bearer_auth \
+  test_send_notification_supports_optional_actions \
+  test_send_notification_adds_actions_to_body
 do
   run_test "${test_func#test_}" "$test_func"
 done
