@@ -319,10 +319,10 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
       sendBtn.textContent = 'Sending...';
       
       try {
-        const res = await fetch(API_BASE + '/session/' + SESSION_ID + '/chat', {
+        const res = await fetch(API_BASE + '/session/' + SESSION_ID + '/message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content })
+          body: JSON.stringify({ parts: [{ type: 'text', text: content }] })
         });
         
         if (!res.ok) throw new Error('Failed to send');
