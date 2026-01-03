@@ -22,6 +22,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install dependencies
+        run: npm install
+
       - name: Verify JavaScript syntax
         run: |
           for file in plugin/*.js; do
