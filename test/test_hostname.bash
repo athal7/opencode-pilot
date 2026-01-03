@@ -114,8 +114,12 @@ test_hostname_returns_null_when_not_set_functional() {
     return 0
   fi
   
+  # Use a temporary HOME to avoid reading user's config file
+  local temp_home
+  temp_home=$(mktemp -d)
+  
   local result
-  result=$(unset NTFY_CALLBACK_HOST; node --experimental-vm-modules -e "
+  result=$(unset NTFY_CALLBACK_HOST; HOME="$temp_home" node --experimental-vm-modules -e "
     // Clear the env var in case it's set
     delete process.env.NTFY_CALLBACK_HOST;
     
@@ -128,9 +132,12 @@ test_hostname_returns_null_when_not_set_functional() {
     }
     console.log('PASS');
   " 2>&1) || {
+    rm -rf "$temp_home"
     echo "Functional test failed: $result"
     return 1
   }
+  
+  rm -rf "$temp_home"
   
   if ! echo "$result" | grep -q "PASS"; then
     echo "$result"
