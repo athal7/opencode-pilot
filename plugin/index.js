@@ -70,38 +70,47 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
 
   // Use directory from OpenCode (the actual repo), not process.cwd() (may be temp devcontainer dir)
   const repoName = basename(directory) || 'unknown'
-  let idleTimer = null
+  
+  // Per-conversation state tracking (Issue #34)
+  // Each conversation has its own idle timer, cancel state, etc.
+  // Key: conversationId (OpenCode session ID)
+  const conversations = new Map()
+  
+  // Global state (shared across all conversations in this plugin instance)
   let retryCount = 0
   let lastErrorTime = 0
-  let wasCanceled = false
-  let currentSessionId = null
+
+  // Helper to get or create conversation state (Issue #34)
+  const getConversation = (id) => {
+    if (!id) return null
+    if (!conversations.has(id)) {
+      conversations.set(id, { idleTimer: null, wasCanceled: false })
+    }
+    return conversations.get(id)
+  }
 
   return {
     event: async ({ event }) => {
-      // Skip all notifications if session was canceled (except checking for canceled status itself)
-      if (wasCanceled && event.type !== 'session.status') {
-        return
-      }
-      
-      // Track session ID from session.created and session.updated events
-      if (event.type === 'session.created' || event.type === 'session.updated') {
-        const eventSessionId = event.properties?.info?.id
-        if (eventSessionId) {
-          currentSessionId = eventSessionId
-        }
-      }
-
       // Handle session status events (idle, busy, retry notifications)
       if (event.type === 'session.status') {
         const status = event.properties?.status?.type
+        // Extract conversation ID from event for per-conversation tracking (Issue #34)
+        const conversationId = event.properties?.info?.id
+        const conv = getConversation(conversationId)
         
-        // Handle canceled status - suppress all future notifications
+        // Skip if no conversation ID or already canceled
+        if (!conv) return
+        if (conv.wasCanceled && status !== 'canceled') return
+        
+        // Handle canceled status - suppress all future notifications for this conversation
         if (status === 'canceled') {
-          wasCanceled = true
-          if (idleTimer) {
-            clearTimeout(idleTimer)
-            idleTimer = null
+          conv.wasCanceled = true
+          if (conv.idleTimer) {
+            clearTimeout(conv.idleTimer)
+            conv.idleTimer = null
           }
+          // Clean up conversation state
+          conversations.delete(conversationId)
           return
         }
         
@@ -132,13 +141,20 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
           retryCount = 0
         }
         
-        // Handle idle status
-        if (status === 'idle' && !idleTimer) {
-          idleTimer = setTimeout(async () => {
+        // Handle idle status - set timer for THIS conversation
+        if (status === 'idle' && !conv.idleTimer) {
+          // Capture conversation ID in closure so notification goes to correct conversation
+          const capturedSessionId = conversationId
+          
+          conv.idleTimer = setTimeout(async () => {
             // Clear timer reference immediately to prevent race conditions
-            idleTimer = null
-            // Don't send notification if session was canceled
-            if (wasCanceled) {
+            const currentConv = conversations.get(capturedSessionId)
+            if (currentConv) {
+              currentConv.idleTimer = null
+            }
+            
+            // Don't send notification if conversation was canceled
+            if (currentConv?.wasCanceled) {
               return
             }
             
@@ -146,7 +162,7 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
             // URL points to the mobile-friendly UI served by the callback service
             // The mobile UI proxies requests to OpenCode's API
             let actions
-            if (serverUrl && config.callbackHost && currentSessionId) {
+            if (serverUrl && config.callbackHost && capturedSessionId) {
               try {
                 const opencodeUrl = new URL(serverUrl)
                 const opencodePort = opencodeUrl.port || (opencodeUrl.protocol === 'https:' ? 443 : 80)
@@ -154,7 +170,7 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
                 // Use HTTPS (via Tailscale Serve) when callbackHttps is enabled
                 const protocol = config.callbackHttps ? 'https' : 'http'
                 const portSuffix = config.callbackHttps ? '' : `:${config.callbackPort}`
-                const mobileUrl = `${protocol}://${config.callbackHost}${portSuffix}/m/${opencodePort}/${repoName}/session/${currentSessionId}`
+                const mobileUrl = `${protocol}://${config.callbackHost}${portSuffix}/m/${opencodePort}/${repoName}/session/${capturedSessionId}`
                 actions = [{
                   action: 'view',
                   label: 'Open Session',
@@ -175,9 +191,9 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
               actions,
             })
           }, config.idleDelayMs)
-        } else if (status === 'busy' && idleTimer) {
-          clearTimeout(idleTimer)
-          idleTimer = null
+        } else if (status === 'busy' && conv.idleTimer) {
+          clearTimeout(conv.idleTimer)
+          conv.idleTimer = null
         }
       }
       
@@ -259,10 +275,14 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
     
     // Cleanup on shutdown
     shutdown: async () => {
-      if (idleTimer) {
-        clearTimeout(idleTimer)
-        idleTimer = null
+      // Clear all conversation idle timers
+      for (const [conversationId, conv] of conversations) {
+        if (conv.idleTimer) {
+          clearTimeout(conv.idleTimer)
+          conv.idleTimer = null
+        }
       }
+      conversations.clear()
       
       // Use isConnected() as the source of truth (socket may have closed unexpectedly)
       if (isConnected()) {

@@ -819,6 +819,54 @@ done
 # Removed notification suppression logging tests - console output is now fully suppressed
 
 # =============================================================================
+# Per-Conversation State Tracking Tests (Issue #34)
+# =============================================================================
+
+test_uses_conversations_map_for_state() {
+  # Plugin should track state per-conversation using a Map, not global variables
+  grep -q "conversations\|Map()" "$PLUGIN_DIR/index.js" || {
+    echo "Conversations Map not found in index.js"
+    return 1
+  }
+}
+
+test_extracts_session_id_from_event() {
+  # Plugin should extract session ID from event properties for routing
+  grep -q "event\.properties.*id\|properties.*info.*id" "$PLUGIN_DIR/index.js" || {
+    echo "Session ID extraction from event not found"
+    return 1
+  }
+}
+
+test_stores_idle_timer_per_conversation() {
+  # Each conversation should have its own idle timer
+  # Look for pattern like conversations.get(sessionId).idleTimer or similar
+  grep -q "idleTimer" "$PLUGIN_DIR/index.js" || {
+    echo "idleTimer not found in index.js"
+    return 1
+  }
+}
+
+test_captures_session_id_in_idle_timer_closure() {
+  # The sessionId should be captured when setting the timer, not read later
+  # This ensures the notification URL points to the correct conversation
+  # Pattern: use local variable in setTimeout callback, not external reference
+  grep -A 30 "setTimeout" "$PLUGIN_DIR/index.js" | grep -q "session" || {
+    echo "Session ID not captured in idle timer"
+    return 1
+  }
+}
+
+test_clears_conversation_state_on_cancel() {
+  # When a conversation is canceled, its state should be cleaned up
+  grep -q "canceled" "$PLUGIN_DIR/index.js" && \
+  grep -q "delete\|clear" "$PLUGIN_DIR/index.js" || {
+    echo "Conversation cleanup on cancel not found"
+    return 1
+  }
+}
+
+# =============================================================================
 # Session Tracking and Open Session Action Tests (Issue #27)
 # =============================================================================
 
@@ -838,10 +886,10 @@ test_tracks_current_session_id() {
   }
 }
 
-test_handles_session_created_event() {
-  # Plugin should handle session.created events to capture session ID
-  grep -q "session\.created" "$PLUGIN_DIR/index.js" || {
-    echo "session.created event handling not found"
+test_extracts_session_id_from_status_event() {
+  # Plugin should extract session ID from session.status events for per-conversation tracking
+  grep -q "session\.status\|properties.*info.*id" "$PLUGIN_DIR/index.js" || {
+    echo "Session ID extraction from status event not found"
     return 1
   }
 }
@@ -882,12 +930,25 @@ test_uses_callback_host_for_session_url() {
 }
 
 echo ""
+echo "Per-Conversation State Tracking Tests (Issue #34):"
+
+for test_func in \
+  test_uses_conversations_map_for_state \
+  test_extracts_session_id_from_event \
+  test_stores_idle_timer_per_conversation \
+  test_captures_session_id_in_idle_timer_closure \
+  test_clears_conversation_state_on_cancel
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
 echo "Session Tracking and Open Session Action Tests (Issue #27):"
 
 for test_func in \
   test_notify_accepts_server_url_param \
   test_tracks_current_session_id \
-  test_handles_session_created_event \
+  test_extracts_session_id_from_status_event \
   test_idle_notification_can_include_actions \
   test_builds_open_session_url \
   test_uses_mobile_ui_url \
