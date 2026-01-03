@@ -358,7 +358,7 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
               <span class="message-role" style="background:#1f6feb">You</span>
               <span>Processing...</span>
             </div>
-            <div class="message-content">\${escapeHtml(content)}</div>
+            <div class="message-content">\${renderMarkdown(content)}</div>
           \`;
           
           // Start polling for assistant response
@@ -397,12 +397,9 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
         const messages = await res.json();
         lastMessageCount = messages.length;
         
-        // Find last message (could be user or assistant)
+        // Find last message and last assistant message
         const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
         const lastRole = lastMessage?.info?.role;
-        
-        // Check if we're waiting for assistant response
-        isProcessing = lastRole === 'user';
         
         // Find last assistant message for display
         let lastAssistant = null;
@@ -413,31 +410,55 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
           }
         }
         
+        // Check if we're waiting for assistant response:
+        // 1. Last message is from user (assistant hasn't started), OR
+        // 2. Last assistant message is still in progress (no completion time)
+        const assistantInProgress = lastAssistant && !lastAssistant.info?.time?.completed;
+        isProcessing = lastRole === 'user' || assistantInProgress;
+        
         if (isProcessing) {
-          // Show processing state - find the last user message
-          let lastUser = null;
-          for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].info && messages[i].info.role === 'user') {
-              lastUser = messages[i];
-              break;
-            }
-          }
+          // Show in-progress assistant response if available, otherwise show user message
+          let displayContent = '';
+          let displayRole = 'You';
+          let roleColor = '#1f6feb';
           
-          let userContent = '';
-          if (lastUser?.parts) {
-            for (const part of lastUser.parts) {
+          if (assistantInProgress && lastAssistant?.parts) {
+            // Show streaming assistant response
+            for (const part of lastAssistant.parts) {
               if (part.type === 'text') {
-                userContent += part.text;
+                displayContent += part.text;
               }
             }
+            displayRole = 'Assistant';
+            roleColor = '#238636';
+          }
+          
+          if (!displayContent) {
+            // Fall back to showing user message
+            let lastUser = null;
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i].info && messages[i].info.role === 'user') {
+                lastUser = messages[i];
+                break;
+              }
+            }
+            if (lastUser?.parts) {
+              for (const part of lastUser.parts) {
+                if (part.type === 'text') {
+                  displayContent += part.text;
+                }
+              }
+            }
+            displayRole = 'You';
+            roleColor = '#1f6feb';
           }
           
           messageEl.innerHTML = \`
             <div class="message-header">
-              <span class="message-role" style="background:#1f6feb">You</span>
+              <span class="message-role" style="background:\${roleColor}">\${displayRole}</span>
               <span>Processing...</span>
             </div>
-            <div class="message-content">\${escapeHtml(userContent || 'Waiting for response...')}</div>
+            <div class="message-content">\${renderMarkdown(displayContent) || 'Waiting for response...'}</div>
           \`;
           messageEl.classList.remove('message-error');
           statusEl.textContent = 'Processing...';
@@ -459,7 +480,7 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
             <div class="message-header">
               <span class="message-role">Assistant</span>
             </div>
-            <div class="message-content">\${escapeHtml(content || 'No content')}</div>
+            <div class="message-content">\${renderMarkdown(content) || 'No content'}</div>
           \`;
           messageEl.classList.remove('message-error');
           statusEl.textContent = 'Ready';
@@ -497,6 +518,40 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+    
+    // Simple markdown renderer for common patterns
+    function renderMarkdown(text) {
+      if (!text) return '';
+      
+      // Escape HTML first
+      let html = escapeHtml(text);
+      
+      // Code blocks (``` ... ```)
+      html = html.replace(/\`\`\`(\\w*)\\n([\\s\\S]*?)\`\`\`/g, '<pre><code>$2</code></pre>');
+      
+      // Inline code (\`...\`)
+      html = html.replace(/\`([^\`]+)\`/g, '<code style="background:#30363d;padding:2px 6px;border-radius:4px;font-size:13px;">$1</code>');
+      
+      // Bold (**...**)
+      html = html.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+      
+      // Italic (*...*)
+      html = html.replace(/\\*([^*]+)\\*/g, '<em>$1</em>');
+      
+      // Headers (# ...)
+      html = html.replace(/^### (.+)$/gm, '<h4 style="margin:12px 0 8px;font-size:14px;">$1</h4>');
+      html = html.replace(/^## (.+)$/gm, '<h3 style="margin:12px 0 8px;font-size:15px;">$1</h3>');
+      html = html.replace(/^# (.+)$/gm, '<h2 style="margin:12px 0 8px;font-size:16px;">$1</h2>');
+      
+      // Lists (- ... or * ... or 1. ...)
+      html = html.replace(/^[\\-\\*] (.+)$/gm, '<li style="margin-left:20px;">$1</li>');
+      html = html.replace(/^\\d+\\. (.+)$/gm, '<li style="margin-left:20px;">$1</li>');
+      
+      // Line breaks
+      html = html.replace(/\\n/g, '<br>');
+      
+      return html;
     }
     
     loadSession();
