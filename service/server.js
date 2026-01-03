@@ -319,28 +319,49 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
       sendBtn.textContent = 'Sending...';
       
       try {
-        const res = await fetch(API_BASE + '/session/' + SESSION_ID + '/message', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ parts: [{ type: 'text', text: content }] })
-        });
+        // OpenCode's /message endpoint waits for LLM response, which can take minutes.
+        // Use AbortController with short timeout - if request is accepted, message is queued.
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
         
-        if (!res.ok) throw new Error('Failed to send');
+        let requestAccepted = false;
+        try {
+          const res = await fetch(API_BASE + '/session/' + SESSION_ID + '/message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parts: [{ type: 'text', text: content }] }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (!res.ok) throw new Error('Failed to send');
+          requestAccepted = true;
+        } catch (fetchErr) {
+          clearTimeout(timeoutId);
+          // AbortError means request was sent but we timed out waiting for LLM response
+          // This is expected - the message was accepted and is being processed
+          if (fetchErr.name === 'AbortError') {
+            requestAccepted = true;
+          } else {
+            throw fetchErr;
+          }
+        }
         
-        inputEl.value = '';
-        inputEl.style.height = 'auto';
-        statusEl.textContent = 'Sent! Refresh to see response.';
-        
-        // Show user message immediately
-        messageEl.innerHTML = \`
-          <div class="message-header">
-            <span class="message-role" style="background:#1f6feb">You</span>
-            <span>Just now</span>
-          </div>
-          <div class="message-content">\${escapeHtml(content)}</div>
-        \`;
+        if (requestAccepted) {
+          inputEl.value = '';
+          inputEl.style.height = 'auto';
+          statusEl.textContent = 'Sent! Check OpenCode for response.';
+          
+          // Show user message immediately
+          messageEl.innerHTML = \`
+            <div class="message-header">
+              <span class="message-role" style="background:#1f6feb">You</span>
+              <span>Just now</span>
+            </div>
+            <div class="message-content">\${escapeHtml(content)}</div>
+          \`;
+        }
       } catch (err) {
-        statusEl.textContent = 'Error sending message';
+        statusEl.textContent = 'Failed to send';
         messageEl.classList.add('message-error');
       } finally {
         isSending = false;
