@@ -988,6 +988,77 @@ test_regular_directory_shows_basename_only() {
   }
 }
 
+# =============================================================================
+# Session Ownership Verification Tests (Issue #50)
+# =============================================================================
+# These tests verify the plugin only processes events for sessions that
+# belong to its OpenCode instance, preventing duplicate notifications when
+# multiple OpenCode instances are running.
+
+test_verifies_session_ownership_before_processing() {
+  # Plugin should verify session exists in its OpenCode instance before processing events
+  # This prevents duplicate notifications from multiple plugin instances
+  grep -q "verifySessionOwnership\|session\.get\|verifiedSessions" "$PLUGIN_DIR/index.js" || {
+    echo "Session ownership verification not found in index.js"
+    return 1
+  }
+}
+
+test_caches_verified_sessions() {
+  # Plugin should cache verified sessions to avoid repeated API calls
+  grep -q "verifiedSessions\|ownedSessions\|sessionCache" "$PLUGIN_DIR/index.js" || {
+    echo "Verified sessions cache not found in index.js"
+    return 1
+  }
+}
+
+test_tracks_rejected_sessions() {
+  # Plugin should track sessions that don't belong to it to avoid repeated lookups
+  grep -q "rejectedSessions\|foreignSessions\|notOurs" "$PLUGIN_DIR/index.js" || {
+    echo "Rejected sessions tracking not found in index.js"
+    return 1
+  }
+}
+
+test_uses_client_session_get_for_verification() {
+  # Plugin should use client.session.get() to verify session ownership
+  grep -q "client\.session\.get\|session\.get" "$PLUGIN_DIR/index.js" || {
+    echo "client.session.get() call not found in index.js"
+    return 1
+  }
+}
+
+test_skips_events_for_foreign_sessions() {
+  # Events for sessions that don't belong to this instance should be skipped
+  # Look for early return when session is not owned
+  grep -q "rejectedSessions\|foreignSessions\|not.*ours\|skip.*event" "$PLUGIN_DIR/index.js" || {
+    echo "Foreign session skip logic not found in index.js"
+    return 1
+  }
+}
+
+test_cleans_up_session_caches_on_shutdown() {
+  # Shutdown handler should clear session ownership caches to prevent memory leaks
+  grep -A 20 "shutdown:" "$PLUGIN_DIR/index.js" | grep -q "verifiedSessions.clear\|rejectedSessions.clear" || {
+    echo "Session cache cleanup not found in shutdown handler"
+    return 1
+  }
+}
+
+echo ""
+echo "Session Ownership Verification Tests (Issue #50):"
+
+for test_func in \
+  test_verifies_session_ownership_before_processing \
+  test_caches_verified_sessions \
+  test_tracks_rejected_sessions \
+  test_uses_client_session_get_for_verification \
+  test_skips_events_for_foreign_sessions \
+  test_cleans_up_session_caches_on_shutdown
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
 echo ""
 echo "Per-Conversation State Tracking Tests (Issue #34):"
 

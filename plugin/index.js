@@ -106,6 +106,13 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
   // Key: conversationId (OpenCode session ID)
   const conversations = new Map()
   
+  // Session ownership verification (Issue #50)
+  // Prevents duplicate notifications when multiple OpenCode instances are running.
+  // Events may be broadcast to all plugin instances, so we verify each session
+  // belongs to our OpenCode instance before processing.
+  const verifiedSessions = new Set()   // Sessions confirmed to be ours
+  const rejectedSessions = new Set()   // Sessions confirmed to be foreign
+  
   // Global state (shared across all conversations in this plugin instance)
   let retryCount = 0
   let lastErrorTime = 0
@@ -118,6 +125,34 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
     }
     return conversations.get(id)
   }
+  
+  // Verify session ownership by checking if it exists in our OpenCode instance (Issue #50)
+  // Returns true if session belongs to us, false if it's foreign
+  const verifySessionOwnership = async (sessionId) => {
+    if (!sessionId) return false
+    
+    // Already verified as ours
+    if (verifiedSessions.has(sessionId)) return true
+    
+    // Already rejected as foreign
+    if (rejectedSessions.has(sessionId)) return false
+    
+    // Query our OpenCode instance to check if session exists
+    try {
+      const result = await client.session.get({ id: sessionId })
+      if (result.data) {
+        verifiedSessions.add(sessionId)
+        return true
+      }
+      // Session doesn't exist in our instance - it's foreign
+      rejectedSessions.add(sessionId)
+      return false
+    } catch {
+      // Error (likely 404) means session doesn't exist in our instance
+      rejectedSessions.add(sessionId)
+      return false
+    }
+  }
 
   return {
     event: async ({ event }) => {
@@ -126,6 +161,12 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
         const status = event.properties?.status?.type
         // Extract conversation ID from event for per-conversation tracking (Issue #34)
         const conversationId = event.properties?.info?.id
+        
+        // Verify session belongs to our OpenCode instance (Issue #50)
+        // Skip events for sessions from other OpenCode instances to prevent duplicates
+        const isOurs = await verifySessionOwnership(conversationId)
+        if (!isOurs) return
+        
         const conv = getConversation(conversationId)
         
         // Skip if no conversation ID or already canceled
@@ -344,6 +385,10 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
         }
       }
       conversations.clear()
+      
+      // Clear session ownership caches (Issue #50)
+      verifiedSessions.clear()
+      rejectedSessions.clear()
       
       // Use isConnected() as the source of truth (socket may have closed unexpectedly)
       if (isConnected()) {
