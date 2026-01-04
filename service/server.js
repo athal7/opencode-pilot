@@ -437,8 +437,15 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
           }
         }
         
-        // Skip empty messages (e.g., system messages)
-        if (!content && role !== 'assistant') continue;
+        // Skip messages with no text content (tool calls, system messages, etc.)
+        if (!content) {
+          // Show in-progress assistant messages even without content
+          if (isInProgress) {
+            content = 'Waiting for response...';
+          } else {
+            continue;
+          }
+        }
         
         const statusText = isInProgress ? '<span style="color:#7d8590;margin-left:8px;">Processing...</span>' : '';
         
@@ -448,17 +455,17 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
               <span class="message-role" style="background:\${roleColor}">\${roleLabel}</span>
               \${statusText}
             </div>
-            <div class="message-content">\${renderMarkdown(content) || (isInProgress ? 'Waiting for response...' : 'No content')}</div>
+            <div class="message-content">\${renderMarkdown(content)}</div>
           </div>
         \`;
       }
       
       messagesListEl.innerHTML = html || '<div class="message"><div class="message-loading">No messages yet</div></div>';
       
-      // Scroll to bottom to show latest message (use setTimeout to ensure DOM has rendered)
-      setTimeout(() => {
+      // Scroll to bottom to show latest message (use requestAnimationFrame for reliable timing)
+      requestAnimationFrame(() => {
         messagesListEl.scrollTop = messagesListEl.scrollHeight;
-      }, 0);
+      });
     }
     
     // Load session messages
