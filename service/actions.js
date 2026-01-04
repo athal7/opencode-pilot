@@ -67,47 +67,62 @@ function buildLocalCommandArgs(item, config) {
 
 /**
  * Build command args for container action type (uses ocdc/opencode-devcontainers)
- * @returns {object} { args: string[], cwd: string } - Command args and working directory
+ * Container action is a two-step process:
+ * 1. ocdc up <branch> - Start the devcontainer
+ * 2. ocdc exec -- opencode --session <name> --prompt "<issue>" - Start opencode inside
+ * 
+ * @returns {object} { upArgs: string[], execArgs: string[], cwd: string, sessionName: string }
  */
 function buildContainerCommandArgs(item, config) {
   const repoPath = expandPath(config.repo_path || ".");
 
-  // Build ocdc up command args array
-  const args = ["ocdc", "up"];
-
-  // Add branch/session name - use session template or default to issue-{number}
+  // Session name - use session template or default to issue-{number}
   const sessionName = config.session?.name_template
     ? buildSessionName(config.session.name_template, item)
     : `issue-${item.number || Date.now()}`;
-  args.push(sessionName);
 
-  // Add JSON flag for machine-readable output
-  args.push("--json");
-
-  // Note: ocdc requires running from the repo directory
-  // The caller must set cwd appropriately
-
+  // Step 1: ocdc up command
+  const upArgs = ["ocdc", "up", sessionName, "--json"];
   if (config.action?.devcontainer_args) {
-    args.push(...config.action.devcontainer_args);
+    upArgs.push(...config.action.devcontainer_args);
   }
 
-  return { args, cwd: repoPath };
+  // Step 2: ocdc exec command to start opencode
+  // We'll fill in --workspace after getting output from step 1
+  const execArgs = ["ocdc", "exec", "--json", "--"];
+  execArgs.push("opencode");
+  execArgs.push("--session", sessionName);
+  
+  // Add prompt from issue
+  const prompt = item.title || item.body || "";
+  if (prompt) {
+    execArgs.push("--prompt", prompt);
+  }
+
+  // Add agent if specified
+  if (config.session?.agent) {
+    execArgs.push("--agent", config.session.agent);
+  }
+
+  return { upArgs, execArgs, cwd: repoPath, sessionName };
 }
 
 /**
  * Build command args array for an action
  * @param {object} item - Item to create session for
  * @param {object} config - Repo config with action settings
- * @returns {object} { args: string[], cwd?: string } Command arguments and optional working directory
+ * @returns {object} Command arguments - structure depends on action type
+ *   - local: { args: string[], type: 'local' }
+ *   - container: { upArgs: string[], execArgs: string[], cwd: string, sessionName: string, type: 'container' }
  */
 export function buildCommandArgs(item, config) {
   const actionType = config.action?.type || "local";
 
   switch (actionType) {
     case "local":
-      return { args: buildLocalCommandArgs(item, config) };
+      return { args: buildLocalCommandArgs(item, config), type: "local" };
     case "container":
-      return buildContainerCommandArgs(item, config);
+      return { ...buildContainerCommandArgs(item, config), type: "container" };
     default:
       throw new Error(`Unknown action type: ${actionType}`);
   }
@@ -120,40 +135,30 @@ export function buildCommandArgs(item, config) {
  * @returns {string} Command string (for display only)
  */
 export function buildCommand(item, config) {
-  const { args, cwd } = buildCommandArgs(item, config);
-  // Quote args with spaces for display
-  const cmdStr = args.map(a => a.includes(" ") ? `"${a}"` : a).join(" ");
-  return cwd ? `(cd ${cwd} && ${cmdStr})` : cmdStr;
+  const cmdInfo = buildCommandArgs(item, config);
+  
+  const quoteArgs = (args) => args.map(a => a.includes(" ") ? `"${a}"` : a).join(" ");
+  
+  if (cmdInfo.type === "container") {
+    const upCmd = quoteArgs(cmdInfo.upArgs);
+    const execCmd = quoteArgs(cmdInfo.execArgs);
+    return `(cd ${cmdInfo.cwd} && ${upCmd} && ${execCmd})`;
+  }
+  
+  // Local type
+  return quoteArgs(cmdInfo.args);
 }
 
 /**
- * Execute an action
- * @param {object} item - Item to create session for
- * @param {object} config - Repo config with action settings
- * @param {object} [options] - Execution options
- * @param {boolean} [options.dryRun] - If true, return command without executing
- * @returns {Promise<object>} Result with command, stdout, stderr, exitCode
+ * Execute a spawn command and return a promise
  */
-export async function executeAction(item, config, options = {}) {
-  const { args, cwd } = buildCommandArgs(item, config);
-  const command = buildCommand(item, config); // For logging/display
-
-  if (options.dryRun) {
-    return {
-      command,
-      dryRun: true,
-    };
-  }
-
+function runSpawn(args, options = {}) {
   return new Promise((resolve, reject) => {
-    // Execute directly without shell (safe from injection)
     const [cmd, ...cmdArgs] = args;
     const spawnOpts = {
       stdio: ["ignore", "pipe", "pipe"],
+      ...options,
     };
-    if (cwd) {
-      spawnOpts.cwd = cwd;
-    }
     const child = spawn(cmd, cmdArgs, spawnOpts);
 
     let stdout = "";
@@ -168,19 +173,86 @@ export async function executeAction(item, config, options = {}) {
     });
 
     child.on("close", (code) => {
-      resolve({
-        command,
-        stdout,
-        stderr,
-        exitCode: code,
-        success: code === 0,
-      });
+      resolve({ stdout, stderr, exitCode: code, success: code === 0 });
     });
 
     child.on("error", (err) => {
       reject(err);
     });
   });
+}
+
+/**
+ * Execute an action
+ * @param {object} item - Item to create session for
+ * @param {object} config - Repo config with action settings
+ * @param {object} [options] - Execution options
+ * @param {boolean} [options.dryRun] - If true, return command without executing
+ * @returns {Promise<object>} Result with command, stdout, stderr, exitCode
+ */
+export async function executeAction(item, config, options = {}) {
+  const cmdInfo = buildCommandArgs(item, config);
+  const command = buildCommand(item, config); // For logging/display
+
+  if (options.dryRun) {
+    return {
+      command,
+      dryRun: true,
+    };
+  }
+
+  if (cmdInfo.type === "container") {
+    // Two-step container action:
+    // 1. Run ocdc up to start container
+    const upResult = await runSpawn(cmdInfo.upArgs, { cwd: cmdInfo.cwd });
+    if (!upResult.success) {
+      return {
+        command,
+        stdout: upResult.stdout,
+        stderr: upResult.stderr,
+        exitCode: upResult.exitCode,
+        success: false,
+        step: "up",
+      };
+    }
+
+    // Parse workspace from ocdc up output
+    let workspace;
+    try {
+      const upOutput = JSON.parse(upResult.stdout);
+      workspace = upOutput.workspace;
+    } catch {
+      // If we can't parse JSON, try to continue without workspace flag
+      workspace = null;
+    }
+
+    // 2. Run ocdc exec to start opencode in container
+    const execArgs = [...cmdInfo.execArgs];
+    if (workspace) {
+      // Insert --workspace before --
+      const dashDashIndex = execArgs.indexOf("--");
+      if (dashDashIndex > 0) {
+        execArgs.splice(dashDashIndex, 0, "--workspace", workspace);
+      }
+    }
+
+    const execResult = await runSpawn(execArgs, { cwd: cmdInfo.cwd });
+    return {
+      command,
+      stdout: upResult.stdout + "\n" + execResult.stdout,
+      stderr: upResult.stderr + "\n" + execResult.stderr,
+      exitCode: execResult.exitCode,
+      success: execResult.success,
+      workspace,
+    };
+  }
+
+  // Local action - single command
+  const result = await runSpawn(cmdInfo.args);
+  return {
+    command,
+    ...result,
+  };
 }
 
 /**
