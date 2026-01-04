@@ -1,10 +1,11 @@
 {
-  "name": "opencode-ntfy",
+  "name": "opencode-pilot",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
   "features": {
-    "ghcr.io/devcontainers/features/git:1": {}
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y bats",
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y bats ripgrep && npm install -g opencode-ai@latest",
   "customizations": {
     "vscode": {
       "extensions": [
