@@ -34,16 +34,17 @@ export function buildSessionName(template, item) {
 
 /**
  * Build command args for local action type
+ * Uses "opencode run" for non-interactive execution
  * @returns {string[]} Array of command arguments (safe for spawn)
  */
 function buildLocalCommandArgs(item, config) {
   const repoPath = expandPath(config.repo_path || ".");
   const sessionName = config.session?.name_template
     ? buildSessionName(config.session.name_template, item)
-    : `session-${item.number || Date.now()}`;
+    : `issue-${item.number || Date.now()}`;
 
-  // Build opencode command args array (no shell escaping needed)
-  const args = ["opencode"];
+  // Build opencode run command args array (non-interactive)
+  const args = ["opencode", "run"];
 
   // Add directory flag
   args.push("-d", repoPath);
@@ -51,15 +52,15 @@ function buildLocalCommandArgs(item, config) {
   // Add session name
   args.push("--session", sessionName);
 
-  // Add prompt from issue (safe - passed directly to spawn, not shell)
-  const prompt = item.title || item.body || "";
-  if (prompt) {
-    args.push("--prompt", prompt);
-  }
-
   // Add agent if specified
   if (config.session?.agent) {
     args.push("--agent", config.session.agent);
+  }
+
+  // Add prompt from issue as the message (must be last for "run" command)
+  const prompt = item.title || item.body || "";
+  if (prompt) {
+    args.push(prompt);
   }
 
   return args;
