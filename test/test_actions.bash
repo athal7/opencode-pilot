@@ -75,9 +75,9 @@ test_actions_calls_opencode() {
   }
 }
 
-test_actions_calls_ocdc() {
-  grep -q "ocdc\|opencode-devcontainers" "$SERVICE_DIR/actions.js" || {
-    echo "ocdc/devcontainers invocation not found"
+test_actions_calls_devcontainer() {
+  grep -q "devcontainer" "$SERVICE_DIR/actions.js" || {
+    echo "devcontainer CLI invocation not found"
     return 1
   }
 }
@@ -237,7 +237,7 @@ for test_func in \
   test_actions_supports_local_type \
   test_actions_supports_container_type \
   test_actions_calls_opencode \
-  test_actions_calls_ocdc
+  test_actions_calls_devcontainer
 do
   run_test "${test_func#test_}" "$test_func"
 done
