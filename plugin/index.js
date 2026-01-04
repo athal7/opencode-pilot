@@ -21,6 +21,34 @@ import {
   tryReconnect,
 } from './service-client.js'
 
+/**
+ * Parse directory path to extract repo name (and branch if in devcontainer clone)
+ * 
+ * Devcontainer clone paths follow the pattern:
+ *   /path/.cache/devcontainer-clones/{repo}/{branch}
+ * 
+ * For these paths, returns "{repo}/{branch}" to show both in notifications.
+ * For regular paths, returns just the basename.
+ * 
+ * @param {string} directory - Directory path from OpenCode
+ * @returns {string} Repo name (with branch suffix for devcontainer clones)
+ */
+function parseRepoInfo(directory) {
+  if (!directory) {
+    return 'unknown'
+  }
+  
+  // Check for devcontainer-clones path pattern
+  const devcontainerMatch = directory.match(/devcontainer-clones\/([^/]+)\/([^/]+)$/)
+  if (devcontainerMatch) {
+    const [, repo, branch] = devcontainerMatch
+    return `${repo}/${branch}`
+  }
+  
+  // Fall back to basename for regular directories
+  return basename(directory) || 'unknown'
+}
+
 // Load configuration from config file and environment
 const config = loadConfig()
 
@@ -70,7 +98,8 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
   }
 
   // Use directory from OpenCode (the actual repo), not process.cwd() (may be temp devcontainer dir)
-  const repoName = basename(directory) || 'unknown'
+  // For devcontainer clones, show both repo and branch name
+  const repoName = parseRepoInfo(directory)
   
   // Per-conversation state tracking (Issue #34)
   // Each conversation has its own idle timer, cancel state, etc.

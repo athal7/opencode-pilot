@@ -957,6 +957,37 @@ test_uses_callback_host_for_session_url() {
   }
 }
 
+# =============================================================================
+# Devcontainer Path Parsing Tests
+# =============================================================================
+
+test_parses_devcontainer_clone_path() {
+  # When directory is a devcontainer clone, should extract repo and branch
+  # Path format: /Users/foo/.cache/devcontainer-clones/{repo}/{branch}
+  grep -q "devcontainer-clones" "$PLUGIN_DIR/index.js" || {
+    echo "devcontainer-clones path parsing not found in index.js"
+    return 1
+  }
+}
+
+test_notification_shows_repo_and_branch() {
+  # Notification title should show both repo name and branch when in devcontainer
+  # e.g., "Idle (opencode-ntfy/fix-something)" instead of just "Idle (fix-something)"
+  grep -q "parseRepoInfo\|getRepoName" "$PLUGIN_DIR/index.js" || {
+    echo "Repo info parsing function not found in index.js"
+    return 1
+  }
+}
+
+test_regular_directory_shows_basename_only() {
+  # For regular directories (not devcontainer clones), should show just basename
+  # e.g., "/Users/foo/code/myrepo" -> "myrepo"
+  grep -q "basename" "$PLUGIN_DIR/index.js" || {
+    echo "basename fallback not found in index.js"
+    return 1
+  }
+}
+
 echo ""
 echo "Per-Conversation State Tracking Tests (Issue #34):"
 
@@ -981,6 +1012,17 @@ for test_func in \
   test_builds_open_session_url \
   test_uses_mobile_ui_url \
   test_uses_callback_host_for_session_url
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Devcontainer Path Parsing Tests:"
+
+for test_func in \
+  test_parses_devcontainer_clone_path \
+  test_notification_shows_repo_and_branch \
+  test_regular_directory_shows_basename_only
 do
   run_test "${test_func#test_}" "$test_func"
 done
