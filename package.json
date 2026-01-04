@@ -13,5 +13,9 @@
   "devDependencies": {
     "@semantic-release/github": "^9.2.6",
     "semantic-release": "^25.0.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "yaml": "^2.8.2"
   }
 }
