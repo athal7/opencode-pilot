@@ -67,7 +67,7 @@ function buildLocalCommandArgs(item, config) {
 
 /**
  * Build command args for container action type (uses ocdc/opencode-devcontainers)
- * @returns {string[]} Array of command arguments (safe for spawn)
+ * @returns {object} { args: string[], cwd: string } - Command args and working directory
  */
 function buildContainerCommandArgs(item, config) {
   const repoPath = expandPath(config.repo_path || ".");
@@ -75,40 +75,37 @@ function buildContainerCommandArgs(item, config) {
   // Build ocdc up command args array
   const args = ["ocdc", "up"];
 
-  // Add branch if available
-  const branch = item.branch || item.headRefName || item.identifier;
-  if (branch) {
-    args.push(branch);
-  }
-
-  // Add repo path
-  args.push("--repo", repoPath);
+  // Add branch/session name - use session template or default to issue-{number}
+  const sessionName = config.session?.name_template
+    ? buildSessionName(config.session.name_template, item)
+    : `issue-${item.number || Date.now()}`;
+  args.push(sessionName);
 
   // Add JSON flag for machine-readable output
   args.push("--json");
 
-  // Note: ocdc handles session creation internally
-  // Additional args can be passed via config.action.devcontainer_args
+  // Note: ocdc requires running from the repo directory
+  // The caller must set cwd appropriately
 
   if (config.action?.devcontainer_args) {
     args.push(...config.action.devcontainer_args);
   }
 
-  return args;
+  return { args, cwd: repoPath };
 }
 
 /**
  * Build command args array for an action
  * @param {object} item - Item to create session for
  * @param {object} config - Repo config with action settings
- * @returns {string[]} Command arguments array (safe for spawn)
+ * @returns {object} { args: string[], cwd?: string } Command arguments and optional working directory
  */
 export function buildCommandArgs(item, config) {
   const actionType = config.action?.type || "local";
 
   switch (actionType) {
     case "local":
-      return buildLocalCommandArgs(item, config);
+      return { args: buildLocalCommandArgs(item, config) };
     case "container":
       return buildContainerCommandArgs(item, config);
     default:
@@ -123,9 +120,10 @@ export function buildCommandArgs(item, config) {
  * @returns {string} Command string (for display only)
  */
 export function buildCommand(item, config) {
-  const args = buildCommandArgs(item, config);
+  const { args, cwd } = buildCommandArgs(item, config);
   // Quote args with spaces for display
-  return args.map(a => a.includes(" ") ? `"${a}"` : a).join(" ");
+  const cmdStr = args.map(a => a.includes(" ") ? `"${a}"` : a).join(" ");
+  return cwd ? `(cd ${cwd} && ${cmdStr})` : cmdStr;
 }
 
 /**
@@ -137,7 +135,7 @@ export function buildCommand(item, config) {
  * @returns {Promise<object>} Result with command, stdout, stderr, exitCode
  */
 export async function executeAction(item, config, options = {}) {
-  const args = buildCommandArgs(item, config);
+  const { args, cwd } = buildCommandArgs(item, config);
   const command = buildCommand(item, config); // For logging/display
 
   if (options.dryRun) {
@@ -150,9 +148,13 @@ export async function executeAction(item, config, options = {}) {
   return new Promise((resolve, reject) => {
     // Execute directly without shell (safe from injection)
     const [cmd, ...cmdArgs] = args;
-    const child = spawn(cmd, cmdArgs, {
+    const spawnOpts = {
       stdio: ["ignore", "pipe", "pipe"],
-    });
+    };
+    if (cwd) {
+      spawnOpts.cwd = cwd;
+    }
+    const child = spawn(cmd, cmdArgs, spawnOpts);
 
     let stdout = "";
     let stderr = "";
