@@ -501,7 +501,7 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
         statusEl.textContent = 'Failed to send';
       } finally {
         isSending = false;
-        sendBtn.disabled = false;
+        sendBtn.disabled = !inputEl.value.trim();
         sendBtn.textContent = 'Send';
       }
     }
