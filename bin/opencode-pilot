@@ -16,7 +16,22 @@ import os from "os";
 // Get script directory for relative imports
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const serviceDir = join(__dirname, "..", "service");
+
+// Find service directory - check multiple locations for homebrew compatibility
+function findServiceDir() {
+  const candidates = [
+    join(__dirname, "..", "service"),      // Development: bin/../service
+    join(__dirname, "..", "libexec"),      // Homebrew: bin/../libexec
+  ];
+  for (const dir of candidates) {
+    if (existsSync(join(dir, "poll-service.js"))) {
+      return dir;
+    }
+  }
+  // Fallback to first candidate (will error with helpful message)
+  return candidates[0];
+}
+const serviceDir = findServiceDir();
 
 // Default paths
 const DEFAULT_CONFIG_PATH = join(
