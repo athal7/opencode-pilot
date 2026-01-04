@@ -30,6 +30,17 @@ const DEFAULT_GLOBAL_CONFIG = {
 };
 
 /**
+ * Default source configuration (applied when no sources specified)
+ */
+const DEFAULT_SOURCE = {
+  type: "github_issue",
+  fetch: {
+    assignee: "@me",
+    state: "open",
+  },
+};
+
+/**
  * Default repo configuration
  */
 const DEFAULT_CONFIG = {
@@ -210,6 +221,11 @@ export function getRepoConfig(repoKey) {
       // Deep merge
       merged = deepMerge(merged, repoConfig);
     }
+  }
+
+  // Apply default source if no sources specified
+  if (!merged.sources || merged.sources.length === 0) {
+    merged.sources = [JSON.parse(JSON.stringify(DEFAULT_SOURCE))];
   }
 
   return merged;

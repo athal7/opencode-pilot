@@ -186,6 +186,167 @@ test_repo_config_prefix_matching() {
 }
 
 # =============================================================================
+# Default Sources Tests
+# =============================================================================
+
+test_repo_config_default_sources() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { loadRepoConfig, getRepoConfig, getAllSources } from './service/repo-config.js';
+    
+    // Load config with repo that has no sources specified
+    const testConfig = {
+      repos: {
+        'myorg/': {
+          repo_path: '~/code/{repo}'
+        },
+        'myorg/backend': {}  // No sources specified
+      }
+    };
+    
+    loadRepoConfig(testConfig);
+    
+    // Get config - should have default github_issue source
+    const config = getRepoConfig('myorg/backend');
+    
+    if (!config.sources || config.sources.length === 0) {
+      console.log('FAIL: Expected default sources, got empty array');
+      process.exit(1);
+    }
+    
+    const defaultSource = config.sources[0];
+    if (defaultSource.type !== 'github_issue') {
+      console.log('FAIL: Expected default source type github_issue, got ' + defaultSource.type);
+      process.exit(1);
+    }
+    
+    if (!defaultSource.fetch || defaultSource.fetch.assignee !== '@me') {
+      console.log('FAIL: Expected default fetch.assignee=@me, got ' + JSON.stringify(defaultSource.fetch));
+      process.exit(1);
+    }
+    
+    if (!defaultSource.fetch || defaultSource.fetch.state !== 'open') {
+      console.log('FAIL: Expected default fetch.state=open, got ' + JSON.stringify(defaultSource.fetch));
+      process.exit(1);
+    }
+    
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_repo_config_explicit_sources_override_defaults() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { loadRepoConfig, getRepoConfig } from './service/repo-config.js';
+    
+    // Load config with explicit sources
+    const testConfig = {
+      repos: {
+        'myorg/backend': {
+          sources: [
+            { type: 'github_pr', fetch: { state: 'open' } }
+          ]
+        }
+      }
+    };
+    
+    loadRepoConfig(testConfig);
+    
+    // Get config - should have explicit sources, not defaults
+    const config = getRepoConfig('myorg/backend');
+    
+    if (config.sources.length !== 1) {
+      console.log('FAIL: Expected 1 source, got ' + config.sources.length);
+      process.exit(1);
+    }
+    
+    if (config.sources[0].type !== 'github_pr') {
+      console.log('FAIL: Expected explicit github_pr source, got ' + config.sources[0].type);
+      process.exit(1);
+    }
+    
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_repo_config_get_all_sources_includes_defaults() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { loadRepoConfig, getAllSources } from './service/repo-config.js';
+    
+    // Load config with repo that has no sources specified
+    const testConfig = {
+      repos: {
+        'myorg/backend': {
+          repo_path: '~/code/backend'
+        }
+      }
+    };
+    
+    loadRepoConfig(testConfig);
+    
+    // getAllSources should include the default source
+    const sources = getAllSources();
+    
+    if (sources.length !== 1) {
+      console.log('FAIL: Expected 1 source from getAllSources, got ' + sources.length);
+      process.exit(1);
+    }
+    
+    if (sources[0].type !== 'github_issue') {
+      console.log('FAIL: Expected github_issue source, got ' + sources[0].type);
+      process.exit(1);
+    }
+    
+    if (sources[0].repo_key !== 'myorg/backend') {
+      console.log('FAIL: Expected repo_key myorg/backend, got ' + sources[0].repo_key);
+      process.exit(1);
+    }
+    
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+# =============================================================================
 # Run Tests
 # =============================================================================
 
@@ -227,6 +388,17 @@ echo "Functional Tests:"
 for test_func in \
   test_repo_config_defaults \
   test_repo_config_prefix_matching
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Default Sources Tests:"
+
+for test_func in \
+  test_repo_config_default_sources \
+  test_repo_config_explicit_sources_override_defaults \
+  test_repo_config_get_all_sources_includes_defaults
 do
   run_test "${test_func#test_}" "$test_func"
 done
