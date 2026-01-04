@@ -279,6 +279,89 @@ test_permission_notification_clears_on_action() {
 }
 
 # =============================================================================
+# Deduplication Tests
+# =============================================================================
+
+test_notifier_has_deduplication() {
+  # Should have deduplication to prevent duplicate notifications
+  grep -q "isDuplicate\|dedupe\|Dedupe" "$PLUGIN_DIR/notifier.js" || {
+    echo "Deduplication logic not found in notifier.js"
+    return 1
+  }
+}
+
+test_notifier_deduplicates_same_notification() {
+  # Same notification sent twice within window should be deduplicated
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    // Import the module to access the dedupe functions
+    import { sendNotification } from './plugin/notifier.js';
+    
+    // Mock fetch to count calls
+    let fetchCount = 0;
+    global.fetch = async () => { fetchCount++; return { ok: true }; };
+    
+    // Send same notification twice
+    await sendNotification({ server: 'http://test', topic: 'test', title: 'Test', message: 'Hello' });
+    await sendNotification({ server: 'http://test', topic: 'test', title: 'Test', message: 'Hello' });
+    
+    if (fetchCount !== 1) {
+      console.log('FAIL: Expected 1 fetch call (deduplicated), got ' + fetchCount);
+      process.exit(1);
+    }
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_notifier_allows_different_notifications() {
+  # Different notifications should not be deduplicated
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { sendNotification } from './plugin/notifier.js';
+    
+    // Mock fetch to count calls
+    let fetchCount = 0;
+    global.fetch = async () => { fetchCount++; return { ok: true }; };
+    
+    // Send different notifications
+    await sendNotification({ server: 'http://test', topic: 'test', title: 'Test', message: 'Hello 1' });
+    await sendNotification({ server: 'http://test', topic: 'test', title: 'Test', message: 'Hello 2' });
+    
+    if (fetchCount !== 2) {
+      console.log('FAIL: Expected 2 fetch calls (different messages), got ' + fetchCount);
+      process.exit(1);
+    }
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+# =============================================================================
 # No-Implementation Check (should throw until implemented)
 # =============================================================================
 
@@ -337,6 +420,17 @@ for test_func in \
   test_permission_notification_truncates_long_commands \
   test_truncate_handles_falsy_input \
   test_permission_notification_clears_on_action
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Deduplication Tests:"
+
+for test_func in \
+  test_notifier_has_deduplication \
+  test_notifier_deduplicates_same_notification \
+  test_notifier_allows_different_notifications
 do
   run_test "${test_func#test_}" "$test_func"
 done

@@ -3,6 +3,49 @@
 
 const MAX_COMMAND_LENGTH = 100
 
+// Deduplication cache: track recently sent notifications to prevent duplicates
+// Key: hash of notification content, Value: timestamp
+const recentNotifications = new Map()
+const DEDUPE_WINDOW_MS = 5000 // 5 seconds
+
+/**
+ * Generate a simple hash for deduplication
+ * @param {string} str - String to hash
+ * @returns {string} Simple hash
+ */
+function simpleHash(str) {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i)
+    hash = ((hash << 5) - hash) + char
+    hash = hash & hash // Convert to 32bit integer
+  }
+  return hash.toString(36)
+}
+
+/**
+ * Check if notification was recently sent (for deduplication)
+ * @param {string} key - Deduplication key
+ * @returns {boolean} True if duplicate
+ */
+function isDuplicate(key) {
+  const now = Date.now()
+  
+  // Clean up old entries
+  for (const [k, timestamp] of recentNotifications) {
+    if (now - timestamp > DEDUPE_WINDOW_MS) {
+      recentNotifications.delete(k)
+    }
+  }
+  
+  if (recentNotifications.has(key)) {
+    return true
+  }
+  
+  recentNotifications.set(key, now)
+  return false
+}
+
 /**
  * Truncate a string to a maximum length, adding ellipsis if needed
  * @param {string} str - String to truncate
@@ -49,6 +92,12 @@ function buildHeaders(authToken) {
  * @param {Object[]} [options.actions] - Optional action buttons (see ntfy docs)
  */
 export async function sendNotification({ server, topic, title, message, priority, tags, authToken, actions }) {
+  // Deduplicate: skip if same notification sent recently
+  const dedupeKey = simpleHash(`${topic}:${title}:${message}`)
+  if (isDuplicate(dedupeKey)) {
+    return
+  }
+
   const body = {
     topic,
     title,
@@ -100,6 +149,13 @@ export async function sendPermissionNotification({
   repoName,
   authToken,
 }) {
+  // Deduplicate: skip if same permission notification sent recently
+  // Use tool+command+repoName (not nonce, which is unique per request)
+  const dedupeKey = simpleHash(`perm:${topic}:${tool}:${command}:${repoName}`)
+  if (isDuplicate(dedupeKey)) {
+    return
+  }
+
   const truncatedCommand = truncate(command, MAX_COMMAND_LENGTH)
   const body = {
     topic,
