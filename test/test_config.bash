@@ -94,6 +94,8 @@ test_config_has_all_fields() {
     "errorDebounceMs"
     "retryNotifyFirst"
     "retryNotifyAfter"
+    "debug"
+    "debugPath"
   )
   
   for field in "${required_fields[@]}"; do
@@ -256,6 +258,124 @@ test_config_get_callback_host_returns_null_when_not_configured() {
   fi
 }
 
+test_config_debug_defaults_to_false() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    // Clear debug env var
+    delete process.env.NTFY_DEBUG;
+    
+    import { loadConfig } from './plugin/config.js';
+    
+    const config = loadConfig();
+    
+    if (config.debug !== false) {
+      console.log('FAIL: Expected debug to default to false, got ' + config.debug);
+      process.exit(1);
+    }
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_config_debug_env_override() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(NTFY_DEBUG=true node --experimental-vm-modules -e "
+    import { loadConfig } from './plugin/config.js';
+    
+    const config = loadConfig();
+    
+    if (config.debug !== true) {
+      console.log('FAIL: Expected debug to be true from env, got ' + config.debug);
+      process.exit(1);
+    }
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_config_debug_path_defaults_to_null() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    // Clear debug path env var
+    delete process.env.NTFY_DEBUG_PATH;
+    
+    import { loadConfig } from './plugin/config.js';
+    
+    const config = loadConfig();
+    
+    if (config.debugPath !== null) {
+      console.log('FAIL: Expected debugPath to default to null, got ' + config.debugPath);
+      process.exit(1);
+    }
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_config_debug_path_env_override() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(NTFY_DEBUG_PATH="/custom/debug.log" node --experimental-vm-modules -e "
+    import { loadConfig } from './plugin/config.js';
+    
+    const config = loadConfig();
+    
+    if (config.debugPath !== '/custom/debug.log') {
+      console.log('FAIL: Expected debugPath to be /custom/debug.log, got ' + config.debugPath);
+      process.exit(1);
+    }
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
 # =============================================================================
 # Run Tests
 # =============================================================================
@@ -300,7 +420,11 @@ for test_func in \
   test_config_load_returns_defaults \
   test_config_env_overrides_defaults \
   test_config_get_callback_host_from_config \
-  test_config_get_callback_host_returns_null_when_not_configured
+  test_config_get_callback_host_returns_null_when_not_configured \
+  test_config_debug_defaults_to_false \
+  test_config_debug_env_override \
+  test_config_debug_path_defaults_to_null \
+  test_config_debug_path_env_override
 do
   run_test "${test_func#test_}" "$test_func"
 done
