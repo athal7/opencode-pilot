@@ -1090,6 +1090,99 @@ test_service_new_session_api_proxies_agents() {
   fi
 }
 
+test_service_mobile_ui_uses_dynamic_viewport_units() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { startService, stopService } from './service/server.js';
+    
+    const config = {
+      httpPort: 0,
+      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+    };
+    
+    const service = await startService(config);
+    const port = service.httpServer.address().port;
+    
+    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
+    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
+      headers: { 'X-Forwarded-Proto': 'https' }
+    });
+    const html = await res.text();
+    
+    // Issue #40: Mobile UI should use dvh (dynamic viewport height) units
+    // instead of vh to handle mobile keyboard viewport changes
+    if (!html.includes('dvh') && !html.includes('100svh')) {
+      console.log('FAIL: Mobile UI should use dynamic viewport units (dvh/svh) for proper mobile keyboard handling');
+      process.exit(1);
+    }
+    
+    // Should not use 100vh for min-height as it doesn't account for keyboard
+    if (html.includes('min-height: 100vh')) {
+      console.log('FAIL: Mobile UI should not use 100vh for min-height (use dvh instead)');
+      process.exit(1);
+    }
+    
+    await stopService(service);
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_service_mobile_ui_has_viewport_resize_handler() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { startService, stopService } from './service/server.js';
+    
+    const config = {
+      httpPort: 0,
+      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+    };
+    
+    const service = await startService(config);
+    const port = service.httpServer.address().port;
+    
+    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
+    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
+      headers: { 'X-Forwarded-Proto': 'https' }
+    });
+    const html = await res.text();
+    
+    // Issue #40: Mobile UI should use visualViewport API to handle keyboard resize
+    if (!html.includes('visualViewport')) {
+      console.log('FAIL: Mobile UI should use visualViewport API for keyboard handling');
+      process.exit(1);
+    }
+    
+    await stopService(service);
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
 test_service_rejects_large_request_body() {
   if ! command -v node &>/dev/null; then
     echo "SKIP: node not available"
@@ -1196,7 +1289,9 @@ for test_func in \
   test_service_mobile_ui_fetches_messages_endpoint \
   test_service_mobile_ui_parses_message_info_role \
   test_service_mobile_ui_fetches_session_title \
-  test_service_mobile_ui_shows_conversation_history
+  test_service_mobile_ui_shows_conversation_history \
+  test_service_mobile_ui_uses_dynamic_viewport_units \
+  test_service_mobile_ui_has_viewport_resize_handler
 do
   run_test "${test_func#test_}" "$test_func"
 done

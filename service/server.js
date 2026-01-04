@@ -149,13 +149,13 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      height: 100%;
-      overflow: hidden;
-    }
-    body {
       font-family: -apple-system, system-ui, 'Segoe UI', sans-serif;
       background: #0d1117;
       color: #e6edf3;
+      height: 100dvh;
+      overflow: hidden;
+    }
+    body {
       display: flex;
       flex-direction: column;
     }
@@ -610,6 +610,24 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
       html = html.replace(/\\n/g, '<br>');
       
       return html;
+    }
+    
+    // Handle mobile keyboard viewport changes using visualViewport API
+    // This ensures the header stays visible when the virtual keyboard opens
+    // iOS Safari scrolls the viewport when keyboard opens - we counteract this
+    function handleViewportResize() {
+      if (window.visualViewport) {
+        const viewport = window.visualViewport;
+        // Offset the body to counteract iOS Safari's viewport scroll
+        // This keeps the header pinned to the top of the visible area
+        document.body.style.transform = 'translateY(' + viewport.offsetTop + 'px)';
+        document.body.style.height = viewport.height + 'px';
+      }
+    }
+    
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleViewportResize);
+      window.visualViewport.addEventListener('scroll', handleViewportResize);
     }
     
     // Load session info (title) and messages
