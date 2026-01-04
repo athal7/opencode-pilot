@@ -35,7 +35,7 @@ export function buildSessionName(template, item) {
 /**
  * Build command args for local action type
  * Uses "opencode run" for non-interactive execution
- * @returns {string[]} Array of command arguments (safe for spawn)
+ * @returns {object} { args: string[], cwd: string }
  */
 function buildLocalCommandArgs(item, config) {
   const repoPath = expandPath(config.repo_path || ".");
@@ -44,10 +44,8 @@ function buildLocalCommandArgs(item, config) {
     : `issue-${item.number || Date.now()}`;
 
   // Build opencode run command args array (non-interactive)
+  // Note: opencode run doesn't accept -d flag, so we use cwd
   const args = ["opencode", "run"];
-
-  // Add directory flag
-  args.push("-d", repoPath);
 
   // Add session name
   args.push("--session", sessionName);
@@ -63,7 +61,7 @@ function buildLocalCommandArgs(item, config) {
     args.push(prompt);
   }
 
-  return args;
+  return { args, cwd: repoPath };
 }
 
 /**
@@ -123,7 +121,7 @@ export function buildCommandArgs(item, config) {
 
   switch (actionType) {
     case "local":
-      return { args: buildLocalCommandArgs(item, config), type: "local" };
+      return { ...buildLocalCommandArgs(item, config), type: "local" };
     case "container":
       return { ...buildContainerCommandArgs(item, config), type: "container" };
     default:
@@ -148,8 +146,9 @@ export function buildCommand(item, config) {
     return `(cd ${cmdInfo.cwd} && ${upCmd} && ${execCmd})`;
   }
   
-  // Local type
-  return quoteArgs(cmdInfo.args);
+  // Local type - show cwd for clarity
+  const cmdStr = quoteArgs(cmdInfo.args);
+  return cmdInfo.cwd ? `(cd ${cmdInfo.cwd} && ${cmdStr})` : cmdStr;
 }
 
 /**

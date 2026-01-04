@@ -110,12 +110,13 @@ test_actions_build_local_command() {
     
     const cmd = buildCommand(item, config);
     
-    if (!cmd.includes('opencode')) {
-      console.log('FAIL: Local command should include opencode');
+    if (!cmd.includes('opencode run')) {
+      console.log('FAIL: Local command should include opencode run');
       process.exit(1);
     }
-    if (!cmd.includes('~/code/myrepo') && !cmd.includes('-d')) {
-      console.log('FAIL: Command should include repo path');
+    // Check for cwd pattern (cd ~/code/myrepo && ...)
+    if (!cmd.includes('cd') || !cmd.includes('myrepo')) {
+      console.log('FAIL: Command should include cd to repo path, got: ' + cmd);
       process.exit(1);
     }
     console.log('PASS');
