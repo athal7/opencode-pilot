@@ -507,6 +507,48 @@ test_no_console_error_calls() {
 }
 
 # =============================================================================
+# Debug Logging Tests
+# =============================================================================
+
+test_index_imports_logger() {
+  grep -q "import.*logger\|from.*logger" "$PLUGIN_DIR/index.js" || {
+    echo "logger import not found in index.js"
+    return 1
+  }
+}
+
+test_index_initializes_logger() {
+  grep -q "initLogger" "$PLUGIN_DIR/index.js" || {
+    echo "initLogger call not found in index.js"
+    return 1
+  }
+}
+
+test_index_uses_debug_for_events() {
+  # Plugin should log events received
+  grep -q "debug.*[Ee]vent" "$PLUGIN_DIR/index.js" || {
+    echo "debug logging for events not found in index.js"
+    return 1
+  }
+}
+
+test_index_uses_debug_for_idle_timer() {
+  # Plugin should log idle timer start/cancel
+  grep -q "debug.*[Ii]dle\|debug.*timer" "$PLUGIN_DIR/index.js" || {
+    echo "debug logging for idle timer not found in index.js"
+    return 1
+  }
+}
+
+test_index_uses_debug_for_initialization() {
+  # Plugin should log initialization with key config
+  grep -q "debug.*[Ii]nitial\|debug.*[Pp]lugin" "$PLUGIN_DIR/index.js" || {
+    echo "debug logging for initialization not found in index.js"
+    return 1
+  }
+}
+
+# =============================================================================
 # Notification Suppression Logging Tests (Issue #7)
 # =============================================================================
 # NOTE: Console output suppression tests removed - all logging disabled to avoid TUI interference
@@ -840,6 +882,19 @@ for test_func in \
   test_no_console_log_calls \
   test_no_console_warn_calls \
   test_no_console_error_calls
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Debug Logging Tests:"
+
+for test_func in \
+  test_index_imports_logger \
+  test_index_initializes_logger \
+  test_index_uses_debug_for_events \
+  test_index_uses_debug_for_idle_timer \
+  test_index_uses_debug_for_initialization
 do
   run_test "${test_func#test_}" "$test_func"
 done
