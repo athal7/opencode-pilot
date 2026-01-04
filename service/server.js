@@ -21,23 +21,36 @@ const DEFAULT_SOCKET_PATH = '/tmp/opencode-ntfy.sock'
 const CONFIG_PATH = join(homedir(), '.config', 'opencode-ntfy', 'config.json')
 
 /**
- * Load callback config from config file
+ * Load callback config from environment variables and config file
+ * Environment variables take precedence over config file values
  * @returns {Object} Config with callbackHttps and callbackHost
  */
 function loadCallbackConfig() {
+  // Start with defaults
+  let callbackHttps = false
+  let callbackHost = null
+  
+  // Load from config file
   try {
     if (existsSync(CONFIG_PATH)) {
       const content = readFileSync(CONFIG_PATH, 'utf8')
       const config = JSON.parse(content)
-      return {
-        callbackHttps: config.callbackHttps === true,
-        callbackHost: config.callbackHost || null,
-      }
+      callbackHttps = config.callbackHttps === true
+      callbackHost = config.callbackHost || null
     }
   } catch {
     // Ignore errors
   }
-  return { callbackHttps: false, callbackHost: null }
+  
+  // Environment variables override config file
+  if (process.env.NTFY_CALLBACK_HTTPS !== undefined) {
+    callbackHttps = process.env.NTFY_CALLBACK_HTTPS === 'true' || process.env.NTFY_CALLBACK_HTTPS === '1'
+  }
+  if (process.env.NTFY_CALLBACK_HOST !== undefined && process.env.NTFY_CALLBACK_HOST !== '') {
+    callbackHost = process.env.NTFY_CALLBACK_HOST
+  }
+  
+  return { callbackHttps, callbackHost }
 }
 
 // Nonce storage: nonce -> { sessionId, permissionId, createdAt }
@@ -1572,6 +1585,13 @@ export async function stopService(service) {
   if (service.cleanupInterval) {
     clearInterval(service.cleanupInterval)
   }
+  
+  // Close all active session connections first
+  // This is necessary because server.close() waits for all connections to close
+  for (const [sessionId, socket] of sessions) {
+    socket.destroy()
+  }
+  sessions.clear()
   
   if (service.httpServer) {
     await new Promise((resolve) => {

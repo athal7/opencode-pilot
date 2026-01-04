@@ -65,6 +65,13 @@ test_service_client_exports_is_connected() {
   }
 }
 
+test_service_client_exports_try_reconnect() {
+  grep -q "export.*function tryReconnect\|export.*tryReconnect" "$PLUGIN_DIR/service-client.js" || {
+    echo "tryReconnect export not found in service-client.js"
+    return 1
+  }
+}
+
 # =============================================================================
 # Implementation Tests
 # =============================================================================
@@ -248,8 +255,10 @@ test_service_client_receives_permission_response() {
     const nonce = await requestNonce('perm-456');
     
     // Simulate callback from ntfy
+    // Include X-Forwarded-Proto to bypass HTTPS redirect (simulates Tailscale Serve proxy)
     const res = await fetch('http://localhost:' + port + '/callback?nonce=' + nonce + '&response=once', {
-      method: 'POST'
+      method: 'POST',
+      headers: { 'X-Forwarded-Proto': 'https' }
     });
     
     if (res.status !== 200) {
@@ -331,6 +340,163 @@ test_service_client_handles_service_not_running() {
 }
 
 # =============================================================================
+# Reconnection Tests (Issue #41)
+# =============================================================================
+
+test_service_client_reconnects_when_service_starts_later() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { startService, stopService } from './service/server.js';
+    import { connectToService, disconnectFromService, isConnected, requestNonce, setPermissionHandler } from './plugin/service-client.js';
+    
+    const socketPath = '/tmp/opencode-ntfy-test-' + process.pid + '.sock';
+    
+    // First, try to connect when service is NOT running
+    const connected = await connectToService({
+      sessionId: 'test-session',
+      socketPath,
+    });
+    
+    if (connected) {
+      console.log('FAIL: Should not connect when service not running');
+      process.exit(1);
+    }
+    
+    // Now start the service
+    const service = await startService({ httpPort: 0, socketPath });
+    
+    // Reconnect should work now
+    const reconnected = await connectToService({
+      sessionId: 'test-session',
+      socketPath,
+    });
+    
+    if (!reconnected) {
+      console.log('FAIL: Should reconnect when service starts');
+      await stopService(service);
+      process.exit(1);
+    }
+    
+    if (!isConnected()) {
+      console.log('FAIL: isConnected() should return true after reconnect');
+      await stopService(service);
+      process.exit(1);
+    }
+    
+    // Verify we can request nonces after reconnect
+    const nonce = await requestNonce('perm-reconnect');
+    if (!nonce) {
+      console.log('FAIL: Should be able to request nonce after reconnect');
+      await disconnectFromService();
+      await stopService(service);
+      process.exit(1);
+    }
+    
+    await disconnectFromService();
+    await stopService(service);
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_service_client_reconnects_after_service_restart() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { startService, stopService } from './service/server.js';
+    import { connectToService, disconnectFromService, isConnected, requestNonce } from './plugin/service-client.js';
+    
+    const socketPath = '/tmp/opencode-ntfy-test-' + process.pid + '.sock';
+    
+    // Start service and connect
+    let service = await startService({ httpPort: 0, socketPath });
+    
+    const connected = await connectToService({
+      sessionId: 'test-session',
+      socketPath,
+    });
+    
+    if (!connected) {
+      console.log('FAIL: Initial connection failed');
+      await stopService(service);
+      process.exit(1);
+    }
+    
+    // Verify connection works
+    const nonce1 = await requestNonce('perm-1');
+    if (!nonce1) {
+      console.log('FAIL: First nonce request failed');
+      await disconnectFromService();
+      await stopService(service);
+      process.exit(1);
+    }
+    
+    // Stop service (simulates service restart)
+    await stopService(service);
+    
+    // Wait a bit for disconnect to be detected
+    await new Promise(r => setTimeout(r, 100));
+    
+    if (isConnected()) {
+      console.log('FAIL: isConnected() should be false after service stop');
+      process.exit(1);
+    }
+    
+    // Restart service
+    service = await startService({ httpPort: 0, socketPath });
+    
+    // Reconnect
+    const reconnected = await connectToService({
+      sessionId: 'test-session',
+      socketPath,
+    });
+    
+    if (!reconnected) {
+      console.log('FAIL: Reconnection after service restart failed');
+      await stopService(service);
+      process.exit(1);
+    }
+    
+    // Verify we can request nonces after reconnect
+    const nonce2 = await requestNonce('perm-2');
+    if (!nonce2) {
+      console.log('FAIL: Nonce request after reconnect failed');
+      await disconnectFromService();
+      await stopService(service);
+      process.exit(1);
+    }
+    
+    await disconnectFromService();
+    await stopService(service);
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+# =============================================================================
 # Run Tests
 # =============================================================================
 
@@ -350,7 +516,8 @@ for test_func in \
   test_service_client_exports_connect \
   test_service_client_exports_disconnect \
   test_service_client_exports_request_nonce \
-  test_service_client_exports_is_connected
+  test_service_client_exports_is_connected \
+  test_service_client_exports_try_reconnect
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -378,6 +545,16 @@ for test_func in \
   test_service_client_requests_nonce \
   test_service_client_receives_permission_response \
   test_service_client_handles_service_not_running
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Reconnection Tests (Issue #41):"
+
+for test_func in \
+  test_service_client_reconnects_when_service_starts_later \
+  test_service_client_reconnects_after_service_restart
 do
   run_test "${test_func#test_}" "$test_func"
 done

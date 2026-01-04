@@ -324,6 +324,22 @@ test_index_handles_permission_updated() {
   }
 }
 
+test_index_imports_try_reconnect() {
+  grep -q "tryReconnect" "$PLUGIN_DIR/index.js" || {
+    echo "tryReconnect import not found in index.js"
+    return 1
+  }
+}
+
+test_index_tries_reconnect_on_permission() {
+  # Plugin should try to reconnect when handling permission events if not connected
+  # This is critical for Issue #41 - permission notifications not received
+  grep -A 20 "permission.updated" "$PLUGIN_DIR/index.js" | grep -q "tryReconnect" || {
+    echo "tryReconnect call not found in permission.updated handler"
+    return 1
+  }
+}
+
 # =============================================================================
 # Retry Event Handling Tests (Issue #7)
 # =============================================================================
@@ -763,7 +779,9 @@ echo "Service Integration Tests:"
 for test_func in \
   test_index_imports_service_client \
   test_index_connects_to_service \
-  test_index_handles_permission_updated
+  test_index_handles_permission_updated \
+  test_index_imports_try_reconnect \
+  test_index_tries_reconnect_on_permission
 do
   run_test "${test_func#test_}" "$test_func"
 done

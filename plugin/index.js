@@ -18,6 +18,7 @@ import {
   isConnected,
   requestNonce,
   setPermissionHandler,
+  tryReconnect,
 } from './service-client.js'
 
 // Load configuration from config file and environment
@@ -259,9 +260,17 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
           return
         }
         
-        // Only send interactive notifications if service is connected
-        if (!config.callbackHost || !isConnected()) {
+        // Only send interactive notifications if callbackHost is configured
+        if (!config.callbackHost) {
           return
+        }
+        
+        // Try to reconnect if not connected (Issue #41: reconnect on permission request)
+        if (!isConnected()) {
+          const reconnected = await tryReconnect()
+          if (!reconnected) {
+            return
+          }
         }
         
         const permissionId = permission.id

@@ -11,6 +11,9 @@ source "$SCRIPT_DIR/test_helper.bash"
 
 SERVICE_DIR="$(dirname "$SCRIPT_DIR")/service"
 
+# Disable HTTPS redirect for tests (overrides any user config)
+export NTFY_CALLBACK_HTTPS=false
+
 echo "Testing service/server.js module..."
 echo ""
 

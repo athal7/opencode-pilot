@@ -15,6 +15,7 @@ const DEFAULT_SOCKET_PATH = '/tmp/opencode-ntfy.sock'
 // Connection state
 let socket = null
 let sessionId = null
+let socketPath = DEFAULT_SOCKET_PATH
 let permissionHandler = null
 let pendingNonceRequests = new Map() // permissionId -> resolve/reject
 
@@ -42,15 +43,22 @@ export function setPermissionHandler(handler) {
  * @returns {Promise<boolean>} True if connected successfully
  */
 export async function connectToService(options) {
-  const socketPath = options.socketPath || DEFAULT_SOCKET_PATH
+  socketPath = options.socketPath || DEFAULT_SOCKET_PATH
   sessionId = options.sessionId
   
   return new Promise((resolve) => {
-    socket = createConnection(socketPath)
+    // Create new socket and capture reference to avoid race conditions
+    // When a connection fails, error and close events both fire. If a
+    // reconnection succeeds before the old close event fires, the close
+    // handler would incorrectly clear the new socket. By capturing the
+    // socket reference in a closure and checking against it, we ensure
+    // only events from the current socket affect the global state.
+    const newSocket = createConnection(socketPath)
+    socket = newSocket
     
     let buffer = ''
     
-    socket.on('connect', () => {
+    newSocket.on('connect', () => {
       // Register session
       sendMessage({
         type: 'register',
@@ -58,7 +66,7 @@ export async function connectToService(options) {
       })
     })
     
-    socket.on('data', (data) => {
+    newSocket.on('data', (data) => {
       buffer += data.toString()
       
       // Process complete messages (newline-delimited JSON)
@@ -78,19 +86,27 @@ export async function connectToService(options) {
       }
     })
     
-    socket.on('error', (err) => {
-      socket = null
+    newSocket.on('error', (err) => {
+      // Only clear global state if this is still the active socket
+      if (socket === newSocket) {
+        socket = null
+      }
       resolve(false)
     })
     
-    socket.on('close', () => {
-      socket = null
-      
-      // Reject any pending nonce requests
-      for (const [permissionId, { reject }] of pendingNonceRequests) {
-        reject(new Error('Service connection closed'))
+    newSocket.on('close', () => {
+      // Only clear global state if this is still the active socket
+      // This prevents race conditions when a failed connection's close
+      // event fires after a successful reconnection
+      if (socket === newSocket) {
+        socket = null
+        
+        // Reject any pending nonce requests
+        for (const [permissionId, { reject }] of pendingNonceRequests) {
+          reject(new Error('Service connection closed'))
+        }
+        pendingNonceRequests.clear()
       }
-      pendingNonceRequests.clear()
     })
   })
 }
@@ -104,6 +120,25 @@ export async function disconnectFromService() {
     socket = null
   }
   sessionId = null
+}
+
+/**
+ * Try to reconnect to the callback service if disconnected
+ * Uses the session ID from the last successful connection
+ * @returns {Promise<boolean>} True if reconnected successfully
+ */
+export async function tryReconnect() {
+  // If already connected, nothing to do
+  if (isConnected()) {
+    return true
+  }
+  
+  // If we have a session ID from a previous connection, try to reconnect
+  if (sessionId) {
+    return connectToService({ sessionId, socketPath })
+  }
+  
+  return false
 }
 
 /**
