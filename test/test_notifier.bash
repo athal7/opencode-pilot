@@ -362,6 +362,33 @@ test_notifier_allows_different_notifications() {
 }
 
 # =============================================================================
+# Debug Logging Tests
+# =============================================================================
+
+test_notifier_imports_logger() {
+  grep -q "import.*logger\|from.*logger" "$PLUGIN_DIR/notifier.js" || {
+    echo "logger import not found in notifier.js"
+    return 1
+  }
+}
+
+test_notifier_logs_send_notification() {
+  # Should log notification send attempts
+  grep -q "debug.*[Nn]otification\|debug.*[Ss]end" "$PLUGIN_DIR/notifier.js" || {
+    echo "debug logging for notification send not found in notifier.js"
+    return 1
+  }
+}
+
+test_notifier_logs_deduplication() {
+  # Should log when deduplicating
+  grep -q "debug.*[Dd]edupe\|debug.*[Ss]kip\|debug.*[Dd]uplicate" "$PLUGIN_DIR/notifier.js" || {
+    echo "debug logging for deduplication not found in notifier.js"
+    return 1
+  }
+}
+
+# =============================================================================
 # No-Implementation Check (should throw until implemented)
 # =============================================================================
 
@@ -431,6 +458,17 @@ for test_func in \
   test_notifier_has_deduplication \
   test_notifier_deduplicates_same_notification \
   test_notifier_allows_different_notifications
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Debug Logging Tests:"
+
+for test_func in \
+  test_notifier_imports_logger \
+  test_notifier_logs_send_notification \
+  test_notifier_logs_deduplication
 do
   run_test "${test_func#test_}" "$test_func"
 done
