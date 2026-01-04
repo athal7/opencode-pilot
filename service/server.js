@@ -307,6 +307,44 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
       color: #7d8590;
       cursor: not-allowed;
     }
+    .selectors {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .selector-group {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .selector-group label {
+      font-size: 11px;
+      color: #7d8590;
+      text-transform: uppercase;
+    }
+    select {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      font-family: inherit;
+      font-size: 13px;
+      padding: 8px 10px;
+      width: 100%;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%237d8590' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 6l3.5 4 3.5-4z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+    }
+    select:focus {
+      outline: none;
+      border-color: #238636;
+    }
+    select:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
@@ -325,6 +363,20 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
     </div>
     
     <div class="input-container">
+      <div class="selectors">
+        <div class="selector-group">
+          <label for="model">Model</label>
+          <select id="model" disabled>
+            <option value="">Loading...</option>
+          </select>
+        </div>
+        <div class="selector-group">
+          <label for="agent">Agent</label>
+          <select id="agent" disabled>
+            <option value="">Loading...</option>
+          </select>
+        </div>
+      </div>
       <div class="input-wrapper">
         <textarea id="input" placeholder="Type a message..." rows="1"></textarea>
         <button id="send" disabled>Send</button>
@@ -342,6 +394,8 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
     const inputEl = document.getElementById('input');
     const sendBtn = document.getElementById('send');
     const statusEl = document.getElementById('status');
+    const modelEl = document.getElementById('model');
+    const agentEl = document.getElementById('agent');
     
     let sessionTitle = '';
     
@@ -369,12 +423,30 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
         
+        // Build message body with agent and optional model
+        const messageBody = {
+          agent: agentEl.value || 'code',
+          parts: [{ type: 'text', text: content }]
+        };
+        
+        // Parse model selection (format: "providerId/modelId")
+        const modelValue = modelEl.value;
+        if (modelValue) {
+          const modelParts = modelValue.split('/');
+          if (modelParts.length >= 2) {
+            messageBody.model = {
+              providerID: modelParts[0],
+              modelID: modelParts.slice(1).join('/')
+            };
+          }
+        }
+        
         let requestAccepted = false;
         try {
           const res = await fetch(API_BASE + '/session/' + SESSION_ID + '/message', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parts: [{ type: 'text', text: content }] }),
+            body: JSON.stringify(messageBody),
             signal: controller.signal
           });
           clearTimeout(timeoutId);
@@ -630,9 +702,78 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
       window.visualViewport.addEventListener('scroll', handleViewportResize);
     }
     
-    // Load session info (title) and messages
+    // Load favorite models from local state and provider API
+    async function loadModels() {
+      try {
+        // Load favorites and provider data in parallel
+        const [favRes, provRes] = await Promise.all([
+          fetch('/favorites'),
+          fetch(API_BASE + '/provider')
+        ]);
+        
+        const favorites = favRes.ok ? await favRes.json() : [];
+        if (!provRes.ok) throw new Error('Failed to load providers');
+        const data = await provRes.json();
+        
+        const allProviders = data.all || [];
+        
+        modelEl.innerHTML = '';
+        
+        // Add favorite models first
+        if (favorites.length > 0) {
+          favorites.forEach(fav => {
+            const provider = allProviders.find(p => p.id === fav.providerID);
+            if (!provider || !provider.models) return;
+            const model = provider.models[fav.modelID];
+            if (!model) return;
+            
+            const opt = document.createElement('option');
+            opt.value = fav.providerID + '/' + fav.modelID;
+            opt.textContent = model.name || fav.modelID;
+            modelEl.appendChild(opt);
+          });
+        } else {
+          // Fallback if no favorites
+          modelEl.innerHTML = '<option value="">Default model</option>';
+        }
+        
+        modelEl.disabled = false;
+      } catch (err) {
+        modelEl.innerHTML = '<option value="">Default model</option>';
+        modelEl.disabled = false;
+      }
+    }
+    
+    // Load agents from OpenCode API
+    async function loadAgents() {
+      try {
+        const res = await fetch(API_BASE + '/agent');
+        if (!res.ok) throw new Error('Failed to load agents');
+        const agents = await res.json();
+        
+        // Filter to user-facing agents:
+        // - mode === 'primary' (not subagents)
+        // - has a description (excludes internal agents like compaction, title, summary)
+        const primaryAgents = agents.filter(a => a.mode === 'primary' && a.description);
+        
+        agentEl.innerHTML = '';
+        primaryAgents.forEach(a => {
+          const opt = document.createElement('option');
+          opt.value = a.name;
+          opt.textContent = a.name;
+          if (a.name === 'code') opt.selected = true;
+          agentEl.appendChild(opt);
+        });
+        agentEl.disabled = false;
+      } catch (err) {
+        agentEl.innerHTML = '<option value="code">code</option>';
+        agentEl.disabled = false;
+      }
+    }
+    
+    // Load session info, messages, and agent/model options
     loadSessionInfo();
-    loadSession();
+    Promise.all([loadSession(), loadModels(), loadAgents()]);
   </script>
 </body>
 </html>`
@@ -841,6 +982,34 @@ function createCallbackServer(port) {
     if (req.method === 'GET' && url.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'text/plain' })
       res.end('OK')
+      return
+    }
+    
+    // GET /favorites - Get favorite models from local OpenCode state
+    if (req.method === 'GET' && url.pathname === '/favorites') {
+      try {
+        const modelFile = join(homedir(), '.local', 'state', 'opencode', 'model.json')
+        if (existsSync(modelFile)) {
+          const data = JSON.parse(readFileSync(modelFile, 'utf8'))
+          res.writeHead(200, { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          })
+          res.end(JSON.stringify(data.favorite || []))
+        } else {
+          res.writeHead(200, { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          })
+          res.end('[]')
+        }
+      } catch (err) {
+        res.writeHead(200, { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        })
+        res.end('[]')
+      }
       return
     }
     

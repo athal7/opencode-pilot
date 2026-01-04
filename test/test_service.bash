@@ -604,6 +604,192 @@ test_service_mobile_ui_shows_conversation_history() {
   fi
 }
 
+test_service_mobile_page_has_agent_selector() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { startService, stopService } from './service/server.js';
+    
+    const config = {
+      httpPort: 0,
+      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+    };
+    
+    const service = await startService(config);
+    const port = service.httpServer.address().port;
+    
+    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
+    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
+      headers: { 'X-Forwarded-Proto': 'https' }
+    });
+    const html = await res.text();
+    
+    // Should have agent selector (select element with id='agent')
+    if (!html.includes('id=\"agent\"') && !html.includes(\"id='agent'\")) {
+      console.log('FAIL: No agent selector found in mobile session page');
+      process.exit(1);
+    }
+    
+    // Should load agents from API
+    if (!html.includes('/agent')) {
+      console.log('FAIL: Mobile page should fetch agents from API');
+      process.exit(1);
+    }
+    
+    await stopService(service);
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_service_mobile_page_has_model_selector() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { startService, stopService } from './service/server.js';
+    
+    const config = {
+      httpPort: 0,
+      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+    };
+    
+    const service = await startService(config);
+    const port = service.httpServer.address().port;
+    
+    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
+    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
+      headers: { 'X-Forwarded-Proto': 'https' }
+    });
+    const html = await res.text();
+    
+    // Should have model selector (select element with id='model')
+    if (!html.includes('id=\"model\"') && !html.includes(\"id='model'\")) {
+      console.log('FAIL: No model selector found in mobile session page');
+      process.exit(1);
+    }
+    
+    // Should load models/providers from API or favorites
+    if (!html.includes('/provider') && !html.includes('/favorites')) {
+      console.log('FAIL: Mobile page should fetch models from API or favorites');
+      process.exit(1);
+    }
+    
+    await stopService(service);
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_service_mobile_page_sends_agent_with_message() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { startService, stopService } from './service/server.js';
+    
+    const config = {
+      httpPort: 0,
+      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+    };
+    
+    const service = await startService(config);
+    const port = service.httpServer.address().port;
+    
+    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
+    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
+      headers: { 'X-Forwarded-Proto': 'https' }
+    });
+    const html = await res.text();
+    
+    // The sendMessage function should include agent in the request body
+    // Look for 'agent:' or 'agent :' in the message body construction
+    if (!html.includes('agent:') && !html.includes('agent :')) {
+      console.log('FAIL: sendMessage should include agent in request body');
+      process.exit(1);
+    }
+    
+    await stopService(service);
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_service_mobile_page_sends_model_with_message() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { startService, stopService } from './service/server.js';
+    
+    const config = {
+      httpPort: 0,
+      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+    };
+    
+    const service = await startService(config);
+    const port = service.httpServer.address().port;
+    
+    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
+    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
+      headers: { 'X-Forwarded-Proto': 'https' }
+    });
+    const html = await res.text();
+    
+    // The sendMessage function should include model in the request body when selected
+    // Look for model config construction (providerID/modelID)
+    if (!html.includes('providerID') || !html.includes('modelID')) {
+      console.log('FAIL: sendMessage should support model selection with providerID/modelID');
+      process.exit(1);
+    }
+    
+    await stopService(service);
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
 # =============================================================================
 # Security Tests
 # =============================================================================
@@ -1046,7 +1232,11 @@ for test_func in \
   test_service_mobile_ui_fetches_session_title \
   test_service_mobile_ui_shows_conversation_history \
   test_service_mobile_ui_uses_dynamic_viewport_units \
-  test_service_mobile_ui_has_viewport_resize_handler
+  test_service_mobile_ui_has_viewport_resize_handler \
+  test_service_mobile_page_has_agent_selector \
+  test_service_mobile_page_has_model_selector \
+  test_service_mobile_page_sends_agent_with_message \
+  test_service_mobile_page_sends_model_with_message
 do
   run_test "${test_func#test_}" "$test_func"
 done
