@@ -71,6 +71,8 @@ Create `~/.config/opencode-pilot/config.json`:
 | `callbackPort` | `4097` | Callback service port |
 | `callbackHttps` | `false` | Use HTTPS via Tailscale Serve |
 | `idleDelayMs` | `300000` | Idle notification delay (default: 5 minutes) |
+| `debug` | `false` | Enable debug logging to file |
+| `debugPath` | *(see below)* | Custom path for debug log file |
 
 ### Environment Variables
 
@@ -83,6 +85,8 @@ Environment variables override config file values:
 | `NTFY_TOKEN` | `token` |
 | `NTFY_CALLBACK_HOST` | `callbackHost` |
 | `NTFY_CALLBACK_PORT` | `callbackPort` |
+| `NTFY_DEBUG` | `debug` |
+| `NTFY_DEBUG_PATH` | `debugPath` |
 
 ## Service Management
 
@@ -162,6 +166,24 @@ Then set `"callbackHttps": true` in your config.
 1. Ensure service is running: `brew services info opencode-pilot`
 2. Verify `callbackHost` is reachable from your phone
 3. Check service logs for errors
+
+### Debug Logging
+
+For detailed troubleshooting, enable debug logging in your config:
+
+```json
+{
+  "debug": true
+}
+```
+
+Debug logs are written to `~/.config/opencode-ntfy/debug.log` and include:
+- Events received from OpenCode
+- Idle timer start/cancel
+- Notification send attempts (success/failure)
+- Service connection status
+
+Use `NTFY_DEBUG_PATH` or `debugPath` to customize the log file location.
 
 ## Related
 
