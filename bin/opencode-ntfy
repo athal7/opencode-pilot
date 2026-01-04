@@ -47,6 +47,16 @@ cmd_setup() {
   echo "Destination: $PLUGIN_DEST"
   echo ""
   
+  # Backup existing config before any modifications
+  if [[ -f "$CONFIG_FILE" ]]; then
+    local backup_file="${CONFIG_FILE}.backup.$(date +%s)"
+    if ! cp "$CONFIG_FILE" "$backup_file"; then
+      echo "ERROR: Failed to create backup of opencode.json"
+      exit 1
+    fi
+    echo "Backup created: $backup_file"
+  fi
+  
   # Copy plugin files
   mkdir -p "$OPENCODE_CONFIG_DIR/plugins"
   rm -rf "$PLUGIN_DEST"
@@ -58,27 +68,33 @@ cmd_setup() {
     if grep -q "plugins/$PLUGIN_NAME" "$CONFIG_FILE" 2>/dev/null; then
       echo "Plugin already in opencode.json"
     else
-      # Add plugin to existing config
-      node -e "
+      # Add plugin to existing config (atomic write via temp file)
+      NTFY_CONFIG_PATH="$CONFIG_FILE" NTFY_PLUGIN_PATH="$PLUGIN_DEST" NTFY_PLUGIN_NAME="$PLUGIN_NAME" node -e "
         const fs = require('fs');
-        const config = JSON.parse(fs.readFileSync('$CONFIG_FILE', 'utf8'));
+        const configPath = process.env.NTFY_CONFIG_PATH;
+        const pluginPath = process.env.NTFY_PLUGIN_PATH;
+        const pluginName = process.env.NTFY_PLUGIN_NAME;
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
         config.plugin = config.plugin || [];
-        if (!config.plugin.some(p => p.includes('plugins/$PLUGIN_NAME'))) {
-          config.plugin.push('$PLUGIN_DEST');
+        if (!config.plugin.some(p => p.includes('plugins/' + pluginName))) {
+          config.plugin.push(pluginPath);
         }
-        fs.writeFileSync('$CONFIG_FILE', JSON.stringify(config, null, 2) + '\n');
+        const tempFile = configPath + '.tmp';
+        fs.writeFileSync(tempFile, JSON.stringify(config, null, 2) + '\n');
+        fs.renameSync(tempFile, configPath);
       "
       echo "Added plugin to opencode.json"
     fi
   else
     mkdir -p "$OPENCODE_CONFIG_DIR"
-    echo '{"plugin": ["'"$PLUGIN_DEST"'"]}' | node -e "
+    NTFY_CONFIG_PATH="$CONFIG_FILE" NTFY_PLUGIN_PATH="$PLUGIN_DEST" node -e "
       const fs = require('fs');
-      let input = '';
-      process.stdin.on('data', d => input += d);
-      process.stdin.on('end', () => {
-        fs.writeFileSync('$CONFIG_FILE', JSON.stringify(JSON.parse(input), null, 2) + '\n');
-      });
+      const configPath = process.env.NTFY_CONFIG_PATH;
+      const pluginPath = process.env.NTFY_PLUGIN_PATH;
+      const config = { plugin: [pluginPath] };
+      const tempFile = configPath + '.tmp';
+      fs.writeFileSync(tempFile, JSON.stringify(config, null, 2) + '\n');
+      fs.renameSync(tempFile, configPath);
     "
     echo "Created opencode.json with plugin configured"
   fi

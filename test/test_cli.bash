@@ -173,6 +173,169 @@ EOF
 }
 
 # =============================================================================
+# Setup Command - Backup Tests
+# =============================================================================
+
+test_setup_creates_backup_before_modification() {
+  setup_test_env
+  
+  # Create existing opencode.json with some content
+  mkdir -p "$HOME/.config/opencode"
+  cat > "$HOME/.config/opencode/opencode.json" <<EOF
+{
+  "someKey": "existingValue"
+}
+EOF
+  
+  # Run setup (it will fail to find plugin source, but should backup first)
+  local output
+  output=$("$CLI_PATH" setup 2>&1) || true
+  
+  # Check for backup file (timestamped)
+  local backup_files
+  backup_files=$(ls "$HOME/.config/opencode/opencode.json.backup."* 2>/dev/null | wc -l | tr -d ' ')
+  
+  cleanup_test_env
+  
+  [[ "$backup_files" -gt 0 ]] || {
+    echo "setup should create a backup file before modification"
+    echo "Output: $output"
+    return 1
+  }
+}
+
+test_setup_backup_contains_original_content() {
+  setup_test_env
+  
+  # Create existing opencode.json with specific content
+  mkdir -p "$HOME/.config/opencode"
+  cat > "$HOME/.config/opencode/opencode.json" <<EOF
+{
+  "existingKey": "mustBePreserved"
+}
+EOF
+  
+  # Run setup
+  "$CLI_PATH" setup 2>&1 || true
+  
+  # Find backup file and check content
+  local backup_file
+  backup_file=$(ls "$HOME/.config/opencode/opencode.json.backup."* 2>/dev/null | head -1)
+  
+  local result=0
+  if [[ -n "$backup_file" ]]; then
+    grep -q "mustBePreserved" "$backup_file" || result=1
+  else
+    result=1
+  fi
+  
+  cleanup_test_env
+  
+  [[ $result -eq 0 ]] || {
+    echo "backup file should contain original content"
+    return 1
+  }
+}
+
+test_setup_shows_backup_location() {
+  setup_test_env
+  
+  # Create existing opencode.json
+  mkdir -p "$HOME/.config/opencode"
+  echo '{}' > "$HOME/.config/opencode/opencode.json"
+  
+  # Run setup and capture output
+  local output
+  output=$("$CLI_PATH" setup 2>&1) || true
+  
+  cleanup_test_env
+  
+  # Output should mention backup location
+  echo "$output" | grep -qi "backup.*opencode.json" || {
+    echo "setup should show backup location in output"
+    echo "Output: $output"
+    return 1
+  }
+}
+
+test_setup_uses_atomic_write() {
+  # This test verifies the implementation uses atomic write pattern
+  # by checking for temp file usage in the code
+  grep -q "\.tmp" "$CLI_PATH" || {
+    echo "setup should use temp file for atomic write"
+    return 1
+  }
+}
+
+test_setup_no_backup_when_no_config_exists() {
+  setup_test_env
+  
+  # Ensure no config exists
+  rm -rf "$HOME/.config/opencode"
+  
+  # Run setup
+  "$CLI_PATH" setup 2>&1 || true
+  
+  # Should not create any backup files (nothing to back up)
+  local backup_files
+  backup_files=$(ls "$HOME/.config/opencode/opencode.json.backup."* 2>/dev/null | wc -l | tr -d ' ')
+  
+  cleanup_test_env
+  
+  [[ "$backup_files" -eq 0 ]] || {
+    echo "setup should not create backup when no config exists"
+    return 1
+  }
+}
+
+test_setup_idempotent_plugin_entry() {
+  setup_test_env
+  
+  # Create config with plugin already registered
+  mkdir -p "$HOME/.config/opencode"
+  cat > "$HOME/.config/opencode/opencode.json" <<EOF
+{"plugin": ["$HOME/.config/opencode/plugins/opencode-ntfy"]}
+EOF
+  
+  # Run setup twice
+  "$CLI_PATH" setup 2>&1 || true
+  "$CLI_PATH" setup 2>&1 || true
+  
+  # Count plugin entries - should still be 1
+  local count
+  count=$(grep -o "opencode-ntfy" "$HOME/.config/opencode/opencode.json" | wc -l | tr -d ' ')
+  
+  cleanup_test_env
+  
+  [[ "$count" -eq 1 ]] || {
+    echo "setup should not duplicate plugin entry (found $count)"
+    return 1
+  }
+}
+
+test_setup_creates_backup_even_on_corrupt_json() {
+  setup_test_env
+  
+  # Create corrupt JSON
+  mkdir -p "$HOME/.config/opencode"
+  echo "not valid json {{{" > "$HOME/.config/opencode/opencode.json"
+  
+  # Run setup - should fail but still create backup
+  "$CLI_PATH" setup 2>&1 || true
+  
+  # Backup should exist
+  local backup_files
+  backup_files=$(ls "$HOME/.config/opencode/opencode.json.backup."* 2>/dev/null | wc -l | tr -d ' ')
+  
+  cleanup_test_env
+  
+  [[ "$backup_files" -gt 0 ]] || {
+    echo "setup should create backup even for corrupt JSON"
+    return 1
+  }
+}
+
+# =============================================================================
 # Run Tests
 # =============================================================================
 
@@ -205,6 +368,21 @@ for test_func in \
   test_status_shows_callback_host_from_config \
   test_status_shows_not_set_when_missing \
   test_status_env_overrides_config
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Setup Command - Backup Tests:"
+
+for test_func in \
+  test_setup_creates_backup_before_modification \
+  test_setup_backup_contains_original_content \
+  test_setup_shows_backup_location \
+  test_setup_uses_atomic_write \
+  test_setup_no_backup_when_no_config_exists \
+  test_setup_idempotent_plugin_entry \
+  test_setup_creates_backup_even_on_corrupt_json
 do
   run_test "${test_func#test_}" "$test_func"
 done
