@@ -220,30 +220,27 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
       min-height: 0;
     }
     .message {
-      display: flex;
-      gap: 10px;
-      align-items: flex-start;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 12px;
     }
-    .message-icon {
-      flex-shrink: 0;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
+    .message-header {
       display: flex;
       align-items: center;
-      justify-content: center;
-      font-size: 14px;
-      margin-top: 2px;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 12px;
+      color: #7d8590;
     }
-    .message-icon.assistant {
+    .message-role {
       background: #238636;
-    }
-    .message-icon.user {
-      background: #1f6feb;
-    }
-    .message-body {
-      flex: 1;
-      min-width: 0;
+      color: #fff;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
     }
     .message-content {
       font-size: 14px;
@@ -711,19 +708,16 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
           toolCallsHtml += '</div>';
         }
         
-        // Icon based on role
-        const icon = isAssistant ? '🤖' : '👤';
-        const iconClass = isAssistant ? 'assistant' : 'user';
-        const statusText = isInProgress ? '<div style="color:#7d8590;font-size:12px;margin-top:4px;">Processing...</div>' : '';
+        const statusText = isInProgress ? '<span style="color:#7d8590;margin-left:8px;">Processing...</span>' : '';
         
         html += \`
           <div class="message">
-            <div class="message-icon \${iconClass}">\${icon}</div>
-            <div class="message-body">
-              \${allContent ? '<div class="message-content">' + renderMarkdown(allContent) + '</div>' : ''}
-              \${toolCallsHtml}
+            <div class="message-header">
+              <span class="message-role" style="background:\${roleColor}">\${roleLabel}</span>
               \${statusText}
             </div>
+            \${allContent ? '<div class="message-content">' + renderMarkdown(allContent) + '</div>' : ''}
+            \${toolCallsHtml}
           </div>
         \`;
       }
