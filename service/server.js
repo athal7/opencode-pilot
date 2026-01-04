@@ -220,27 +220,30 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
       min-height: 0;
     }
     .message {
-      background: #21262d;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      padding: 12px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
     }
-    .message-header {
+    .message-icon {
+      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-      font-size: 12px;
-      color: #7d8590;
+      justify-content: center;
+      font-size: 14px;
+      margin-top: 2px;
     }
-    .message-role {
+    .message-icon.assistant {
       background: #238636;
-      color: #fff;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
+    }
+    .message-icon.user {
+      background: #1f6feb;
+    }
+    .message-body {
+      flex: 1;
+      min-width: 0;
     }
     .message-content {
       font-size: 14px;
@@ -708,16 +711,19 @@ function mobileSessionPage({ repoName, sessionId, opencodePort }) {
           toolCallsHtml += '</div>';
         }
         
-        const statusText = isInProgress ? '<span style="color:#7d8590;margin-left:8px;">Processing...</span>' : '';
+        // Icon based on role
+        const icon = isAssistant ? '🤖' : '👤';
+        const iconClass = isAssistant ? 'assistant' : 'user';
+        const statusText = isInProgress ? '<div style="color:#7d8590;font-size:12px;margin-top:4px;">Processing...</div>' : '';
         
         html += \`
           <div class="message">
-            <div class="message-header">
-              <span class="message-role" style="background:\${roleColor}">\${roleLabel}</span>
+            <div class="message-icon \${iconClass}">\${icon}</div>
+            <div class="message-body">
+              \${allContent ? '<div class="message-content">' + renderMarkdown(allContent) + '</div>' : ''}
+              \${toolCallsHtml}
               \${statusText}
             </div>
-            \${allContent ? '<div class="message-content">' + renderMarkdown(allContent) + '</div>' : ''}
-            \${toolCallsHtml}
           </div>
         \`;
       }
