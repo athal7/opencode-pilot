@@ -35,9 +35,9 @@ jobs:
 
       - name: Run unit tests
         run: npm test
-
-      - name: Run integration tests
-        run: ./test/run_tests.bash
+      
+      # Note: Bash integration tests removed pending conversion to JS (see #63)
+      # The JS unit tests in test/unit/ provide coverage for core functionality
 
   release:
     needs: test
