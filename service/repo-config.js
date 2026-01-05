@@ -1,127 +1,53 @@
 /**
- * repo-config.js - Unified repository configuration management
+ * repo-config.js - Configuration management
  *
- * Manages per-repository configuration stored in ~/.config/opencode-pilot/repos.yaml
- * Supports exact matches (myorg/backend) and prefix matches (myorg/)
- * Configs are merged with most specific match taking precedence
+ * Manages configuration stored in ~/.config/opencode-pilot/config.yaml
+ * Supports:
+ * - repos: per-repository settings (use YAML anchors for sharing)
+ * - sources: polling sources with generic tool references
+ * - tools: field mappings for normalizing MCP responses
+ * - templates: prompt templates stored as markdown files
  */
 
 import fs from "fs";
 import path from "path";
 import os from "os";
 import YAML from "yaml";
+import { getNestedValue } from "./utils.js";
 
 // Default config path
 const DEFAULT_CONFIG_PATH = path.join(
   os.homedir(),
-  ".config/opencode-pilot/repos.yaml"
+  ".config/opencode-pilot/config.yaml"
+);
+
+// Default templates directory
+const DEFAULT_TEMPLATES_DIR = path.join(
+  os.homedir(),
+  ".config/opencode-pilot/templates"
 );
 
 // In-memory config cache (for testing and runtime)
 let configCache = null;
 
 /**
- * Default global configuration
+ * Expand template string with item fields
+ * Supports {field} and {field.nested} syntax
  */
-const DEFAULT_GLOBAL_CONFIG = {};
-
-/**
- * Default source configuration (applied when no sources specified)
- */
-const DEFAULT_SOURCE = {
-  type: "github_issue",
-  fetch: {
-    assignee: "@me",
-    state: "open",
-  },
-};
-
-/**
- * Default repo configuration
- */
-const DEFAULT_CONFIG = {
-  sources: [],
-  readiness: {
-    labels: {
-      required: [],
-      any_of: [],
-      exclude: [],
-    },
-    priority: {
-      labels: [],
-      age_weight: 1,
-    },
-    dependencies: {
-      check_body_references: true,
-      blocking_labels: ["blocked"],
-    },
-  },
-};
-
-/**
- * Deep merge two objects
- * Arrays named 'sources' are concatenated, other arrays are replaced
- */
-function deepMerge(base, overlay) {
-  if (!overlay) return base;
-  if (!base) return overlay;
-
-  if (typeof base !== "object" || typeof overlay !== "object") {
-    return overlay;
-  }
-
-  if (Array.isArray(base) || Array.isArray(overlay)) {
-    return overlay;
-  }
-
-  const result = { ...base };
-
-  for (const key of Object.keys(overlay)) {
-    if (key === "sources") {
-      // Concatenate sources arrays
-      result[key] = [...(base[key] || []), ...(overlay[key] || [])];
-    } else if (
-      typeof base[key] === "object" &&
-      typeof overlay[key] === "object" &&
-      !Array.isArray(base[key]) &&
-      !Array.isArray(overlay[key])
-    ) {
-      // Recursively merge objects
-      result[key] = deepMerge(base[key], overlay[key]);
-    } else if (overlay[key] !== undefined) {
-      // Overlay wins for primitives and arrays
-      result[key] = overlay[key];
-    }
-  }
-
-  return result;
+function expandTemplate(template, item) {
+  return template.replace(/\{([^}]+)\}/g, (match, fieldPath) => {
+    const value = getNestedValue(item, fieldPath);
+    return value !== undefined ? String(value) : match;
+  });
 }
 
 /**
- * Expand {repo} placeholder in strings
- */
-function expandPlaceholders(obj, repoName) {
-  if (typeof obj === "string") {
-    return obj.replace(/\{repo\}/g, repoName);
-  }
-  if (Array.isArray(obj)) {
-    return obj.map((item) => expandPlaceholders(item, repoName));
-  }
-  if (typeof obj === "object" && obj !== null) {
-    const result = {};
-    for (const [key, value] of Object.entries(obj)) {
-      result[key] = expandPlaceholders(value, repoName);
-    }
-    return result;
-  }
-  return obj;
-}
-
-/**
- * Load repo configuration from YAML file or object
+ * Load configuration from YAML file or object
  * @param {string|object} [configOrPath] - Path to YAML file or config object
  */
 export function loadRepoConfig(configOrPath) {
+  const emptyConfig = { repos: {}, sources: [] };
+
   if (typeof configOrPath === "object") {
     // Direct config object (for testing)
     configCache = configOrPath;
@@ -131,12 +57,18 @@ export function loadRepoConfig(configOrPath) {
   const configPath = configOrPath || DEFAULT_CONFIG_PATH;
 
   if (!fs.existsSync(configPath)) {
-    configCache = { repos: {} };
+    configCache = emptyConfig;
     return configCache;
   }
 
-  const content = fs.readFileSync(configPath, "utf-8");
-  configCache = YAML.parse(content);
+  try {
+    const content = fs.readFileSync(configPath, "utf-8");
+    configCache = YAML.parse(content, { merge: true }) || emptyConfig;
+  } catch (err) {
+    // Log error but continue with empty config to allow graceful degradation
+    console.error(`Warning: Failed to parse config at ${configPath}: ${err.message}`);
+    configCache = emptyConfig;
+  }
   return configCache;
 }
 
@@ -151,118 +83,107 @@ function getRawConfig() {
 }
 
 /**
- * Find matching config keys for a repo (prefix and exact matches)
- * Returns keys sorted by specificity (most specific last)
- */
-function findMatchingKeys(repoKey) {
-  const config = getRawConfig();
-  const repos = config.repos || {};
-
-  const matches = [];
-
-  for (const configKey of Object.keys(repos)) {
-    // Exact match
-    if (configKey === repoKey) {
-      matches.push({ key: configKey, length: configKey.length, exact: true });
-    }
-    // Prefix match (config key ends with / and repo starts with it)
-    else if (configKey.endsWith("/") && repoKey.startsWith(configKey)) {
-      matches.push({ key: configKey, length: configKey.length, exact: false });
-    }
-  }
-
-  // Sort by length (less specific first), exact matches last among same length
-  matches.sort((a, b) => {
-    if (a.length !== b.length) return a.length - b.length;
-    if (a.exact !== b.exact) return a.exact ? 1 : -1;
-    return 0;
-  });
-
-  return matches.map((m) => m.key);
-}
-
-/**
- * Get configuration for a specific repo with prefix matching and merging
+ * Get configuration for a specific repo
  * @param {string} repoKey - Repository identifier (e.g., "myorg/backend")
- * @returns {object} Merged configuration with defaults
+ * @returns {object} Repository configuration or empty object
  */
 export function getRepoConfig(repoKey) {
   const config = getRawConfig();
   const repos = config.repos || {};
+  const repoConfig = repos[repoKey] || {};
 
-  // Start with defaults
-  let merged = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-
-  // Find all matching keys (sorted by specificity)
-  const matchingKeys = findMatchingKeys(repoKey);
-
-  // Extract repo name for placeholder expansion
-  const repoName = repoKey.split("/").pop();
-
-  // Apply each matching config in order
-  for (const configKey of matchingKeys) {
-    let repoConfig = repos[configKey];
-    if (repoConfig) {
-      // Expand placeholders
-      repoConfig = expandPlaceholders(repoConfig, repoName);
-      // Deep merge
-      merged = deepMerge(merged, repoConfig);
-    }
+  // Normalize: support both 'path' and 'repo_path' keys
+  if (repoConfig.path && !repoConfig.repo_path) {
+    return { ...repoConfig, repo_path: repoConfig.path };
   }
 
-  // Apply default source if no sources specified
-  if (!merged.sources || merged.sources.length === 0) {
-    merged.sources = [JSON.parse(JSON.stringify(DEFAULT_SOURCE))];
-  }
-
-  return merged;
+  return repoConfig;
 }
 
 /**
- * Get all sources across all repos (for polling)
- * @returns {Array} Array of {repo_key, repo_path, ...source} objects
+ * Get all top-level sources (for polling)
+ * @returns {Array} Array of source configurations
+ */
+export function getSources() {
+  const config = getRawConfig();
+  return config.sources || [];
+}
+
+/**
+ * Get all sources (alias for getSources)
+ * @returns {Array} Array of source configurations
  */
 export function getAllSources() {
+  return getSources();
+}
+
+/**
+ * Get field mappings for a tool provider
+ * @param {string} provider - Tool provider name (e.g., "github", "linear")
+ * @returns {object|null} Field mappings or null if not configured
+ */
+export function getToolMappings(provider) {
   const config = getRawConfig();
-  const repos = config.repos || {};
+  const tools = config.tools || {};
+  const toolConfig = tools[provider];
 
-  const sources = [];
+  if (!toolConfig || !toolConfig.mappings) {
+    return null;
+  }
 
-  // Only process non-prefix repos (exact matches)
-  for (const repoKey of Object.keys(repos)) {
-    if (repoKey.endsWith("/")) continue; // Skip prefixes
+  return toolConfig.mappings;
+}
 
-    const repoConfig = getRepoConfig(repoKey);
-    const repoPath = repoConfig.repo_path || "";
+/**
+ * Load a template from the templates directory
+ * @param {string} templateName - Template name (without .md extension)
+ * @param {string} [templatesDir] - Templates directory path (for testing)
+ * @returns {string|null} Template content or null if not found
+ */
+export function getTemplate(templateName, templatesDir) {
+  const dir = templatesDir || DEFAULT_TEMPLATES_DIR;
+  const templatePath = path.join(dir, `${templateName}.md`);
 
-    for (const source of repoConfig.sources || []) {
-      sources.push({
-        repo_key: repoKey,
-        repo_path: repoPath,
-        ...source,
-      });
+  if (!fs.existsSync(templatePath)) {
+    return null;
+  }
+
+  return fs.readFileSync(templatePath, "utf-8");
+}
+
+/**
+ * Resolve repos for an item based on source configuration
+ * @param {object} source - Source configuration
+ * @param {object} item - Item from the source
+ * @returns {Array<string>} Array of repo keys
+ */
+export function resolveRepoForItem(source, item) {
+  // Multi-repo: explicit repos array
+  if (Array.isArray(source.repos)) {
+    return source.repos;
+  }
+
+  // Single repo from field reference (e.g., "{repository.full_name}")
+  if (typeof source.repo === "string") {
+    const resolved = expandTemplate(source.repo, item);
+    // Only return if actually resolved (not still a template)
+    if (resolved && !resolved.includes("{")) {
+      return [resolved];
     }
   }
 
-  return sources;
+  // No repo configuration - repo-agnostic source
+  return [];
 }
 
 /**
  * List all configured repo keys
- * @param {object} [options] - Options
- * @param {boolean} [options.includePrefix] - Include prefix keys (default: true)
  * @returns {Array<string>} List of repo keys
  */
-export function listRepos(options = {}) {
+export function listRepos() {
   const config = getRawConfig();
   const repos = config.repos || {};
-  const includePrefix = options.includePrefix !== false;
-
-  const keys = Object.keys(repos);
-  if (includePrefix) {
-    return keys;
-  }
-  return keys.filter((k) => !k.endsWith("/"));
+  return Object.keys(repos);
 }
 
 /**
@@ -278,32 +199,19 @@ export function findRepoByPath(searchPath) {
   const normalizedSearch = path.resolve(searchPath.replace(/^~/, os.homedir()));
 
   for (const repoKey of Object.keys(repos)) {
-    if (repoKey.endsWith("/")) continue; // Skip prefixes
+    const repoConfig = repos[repoKey];
+    const repoPath = repoConfig.repo_path || repoConfig.path;
+    if (!repoPath) continue;
 
-    const repoConfig = getRepoConfig(repoKey);
-    if (!repoConfig.repo_path) continue;
-
-    const repoPath = path.resolve(
-      repoConfig.repo_path.replace(/^~/, os.homedir())
+    const normalizedRepoPath = path.resolve(
+      repoPath.replace(/^~/, os.homedir())
     );
-    if (normalizedSearch === repoPath) {
+    if (normalizedSearch === normalizedRepoPath) {
       return repoKey;
     }
   }
 
   return null;
-}
-
-/**
- * Get global configuration (top-level settings outside repos)
- * @returns {object} Global config with defaults
- */
-export function getGlobalConfig() {
-  const config = getRawConfig();
-  return {
-    ...DEFAULT_GLOBAL_CONFIG,
-    ...config.global,
-  };
 }
 
 /**

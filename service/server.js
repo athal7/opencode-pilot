@@ -19,8 +19,8 @@ import { join, dirname } from 'path'
 // Default configuration
 const DEFAULT_HTTP_PORT = 4097
 const DEFAULT_SOCKET_PATH = '/tmp/opencode-pilot.sock'
-const CONFIG_PATH = join(homedir(), '.config', 'opencode-pilot', 'config.json')
-const DEFAULT_REPOS_CONFIG = join(homedir(), '.config', 'opencode-pilot', 'repos.yaml')
+const CONFIG_PATH = join(homedir(), '.config', 'opencode-pilot', 'config.yaml')
+const DEFAULT_REPOS_CONFIG = join(homedir(), '.config', 'opencode-pilot', 'config.yaml')
 const DEFAULT_POLL_INTERVAL = 5 * 60 * 1000 // 5 minutes
 
 /**
@@ -1363,7 +1363,7 @@ function handleSocketMessage(socket, message) {
  * @param {string} [config.socketPath] - Unix socket path (default: /tmp/opencode-pilot.sock)
  * @param {boolean} [config.enablePolling] - Enable polling for tracker items (default: true)
  * @param {number} [config.pollInterval] - Poll interval in ms (default: 5 minutes)
- * @param {string} [config.reposConfig] - Path to repos.yaml config
+ * @param {string} [config.reposConfig] - Path to config.yaml
  * @returns {Promise<Object>} Service instance with httpServer, socketServer, polling, and cleanup interval
  */
 export async function startService(config = {}) {
@@ -1428,7 +1428,7 @@ export async function startService(config = {}) {
       console.warn(`[opencode-pilot] Could not start polling: ${err.message}`)
     }
   } else if (enablePolling) {
-    console.log(`[opencode-pilot] Polling disabled (no repos.yaml at ${reposConfig})`)
+    console.log(`[opencode-pilot] Polling disabled (no config.yaml at ${reposConfig})`)
   }
   
   return {

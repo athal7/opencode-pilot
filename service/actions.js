@@ -6,9 +6,17 @@
  */
 
 import { spawn } from "child_process";
+import { readFileSync, existsSync } from "fs";
 import { debug } from "./logger.js";
+import { getNestedValue } from "./utils.js";
 import path from "path";
 import os from "os";
+
+// Default templates directory
+const DEFAULT_TEMPLATES_DIR = path.join(
+  os.homedir(),
+  ".config/opencode-pilot/templates"
+);
 
 /**
  * Expand ~ to home directory
@@ -22,13 +30,15 @@ function expandPath(p) {
 
 /**
  * Expand a template string with item fields
+ * Supports both simple ({field}) and nested ({field.subfield}) references
  * @param {string} template - Template with {placeholders}
  * @param {object} item - Item with fields to substitute
  * @returns {string} Expanded string
  */
 export function expandTemplate(template, item) {
-  return template.replace(/\{(\w+)\}/g, (_, key) => {
-    return item[key] !== undefined ? String(item[key]) : `{${key}}`;
+  return template.replace(/\{([\w.]+)\}/g, (match, key) => {
+    const value = getNestedValue(item, key);
+    return value !== undefined ? String(value) : match;
   });
 }
 
@@ -40,6 +50,100 @@ export function expandTemplate(template, item) {
  */
 export function buildSessionName(template, item) {
   return expandTemplate(template, item);
+}
+
+/**
+ * Load a template file and expand it with item fields
+ * @param {string} templateName - Template name (without .md extension)
+ * @param {object} item - Item with fields to substitute
+ * @param {string} [templatesDir] - Templates directory path (for testing)
+ * @returns {string} Expanded template, or fallback to title+body
+ */
+export function buildPromptFromTemplate(templateName, item, templatesDir) {
+  const dir = templatesDir || DEFAULT_TEMPLATES_DIR;
+  const templatePath = path.join(dir, `${templateName}.md`);
+
+  let template;
+  if (existsSync(templatePath)) {
+    template = readFileSync(templatePath, "utf-8");
+  } else {
+    // Fallback: combine title and body
+    const parts = [];
+    if (item.title) parts.push(item.title);
+    if (item.body) parts.push(item.body);
+    return parts.join("\n\n");
+  }
+
+  return expandTemplate(template, item);
+}
+
+/**
+ * Merge source, repo config, and defaults into action config
+ * Priority: source > repo > defaults
+ * @param {object} source - Source configuration
+ * @param {object} repoConfig - Repository configuration
+ * @param {object} defaults - Default configuration
+ * @returns {object} Merged action config
+ */
+export function getActionConfig(source, repoConfig, defaults) {
+  return {
+    // Defaults first
+    ...defaults,
+    // Repo config overrides defaults
+    ...repoConfig,
+    // Preserve nested session config
+    session: {
+      ...(defaults.session || {}),
+      ...(repoConfig.session || {}),
+    },
+    // Source-level overrides (highest priority)
+    ...(source.prompt && { prompt: source.prompt }),
+    ...(source.agent && { agent: source.agent }),
+    ...(source.model && { model: source.model }),
+    ...(source.working_dir && { working_dir: source.working_dir }),
+  };
+}
+
+/**
+ * Get command info using new config format
+ * @param {object} item - Item to create session for
+ * @param {object} config - Merged action config
+ * @param {string} [templatesDir] - Templates directory path (for testing)
+ * @returns {object} { args: string[], cwd: string }
+ */
+export function getCommandInfoNew(item, config, templatesDir) {
+  // Determine working directory: working_dir > path > repo_path > home
+  const workingDir = config.working_dir || config.path || config.repo_path || "~";
+  const cwd = expandPath(workingDir);
+
+  // Build session name
+  const sessionName = config.session?.name
+    ? buildSessionName(config.session.name, item)
+    : `session-${item.number || item.id || Date.now()}`;
+
+  // Build command args
+  const args = ["opencode", "run"];
+  
+  // Add session title
+  args.push("--title", sessionName);
+  
+  // Add agent if specified
+  if (config.agent) {
+    args.push("--agent", config.agent);
+  }
+  
+  // Add model if specified
+  if (config.model) {
+    args.push("--model", config.model);
+  }
+
+  // Build prompt from template
+  const prompt = buildPromptFromTemplate(config.prompt || "default", item, templatesDir);
+  if (prompt) {
+    args.push(prompt);
+  }
+
+  return { args, cwd };
 }
 
 /**
@@ -101,7 +205,7 @@ function buildCommandArgs(item, config) {
  * @returns {object} { args: string[], cwd: string }
  */
 export function getCommandInfo(item, config) {
-  return buildCommandArgs(item, config);
+  return getCommandInfoNew(item, config);
 }
 
 /**

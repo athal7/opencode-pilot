@@ -53,8 +53,8 @@ const OPENCODE_CONFIG_DIR = join(os.homedir(), ".config/opencode");
 const PLUGIN_NAME = "opencode-pilot";
 const PLUGIN_DEST = join(OPENCODE_CONFIG_DIR, "plugins", PLUGIN_NAME);
 const OPENCODE_CONFIG_FILE = join(OPENCODE_CONFIG_DIR, "opencode.json");
-const PILOT_CONFIG_FILE = join(os.homedir(), ".config/opencode-pilot/config.json");
-const DEFAULT_REPOS_CONFIG = join(os.homedir(), ".config/opencode-pilot/repos.yaml");
+const PILOT_CONFIG_FILE = join(os.homedir(), ".config/opencode-pilot/config.yaml");
+const PILOT_TEMPLATES_DIR = join(os.homedir(), ".config/opencode-pilot/templates");
 
 // Parse command line arguments
 function parseArgs(args) {
@@ -105,20 +105,25 @@ Usage:
   opencode-pilot <command> [options]
 
 Commands:
-  start         Start the callback service (foreground)
-  setup         Copy plugin files and configure OpenCode
-  status        Show installation and service status
-  help          Show this help message
+  start                Start the callback service (foreground)
+  setup                Copy plugin files and configure OpenCode
+  status               Show installation and service status
+  config               Validate and show configuration
+  test-source NAME     Test a source by fetching items and showing mappings
+  test-mapping MCP     Test field mappings with sample JSON input
+  help                 Show this help message
 
 The service handles:
 - Notification callbacks from ntfy
-- Mobile UI for responding to sessions
 - Polling for GitHub/Linear issues to work on
 
 Examples:
-  opencode-pilot start               # Start service (foreground)
-  opencode-pilot setup               # Initial setup
-  opencode-pilot status              # Check status
+  opencode-pilot start                   # Start service (foreground)
+  opencode-pilot setup                   # Initial setup
+  opencode-pilot status                  # Check status
+  opencode-pilot config                  # Validate and show config
+  opencode-pilot test-source my-issues   # Test a source
+  echo '{"url":"https://linear.app/team/issue/PROJ-123/title"}' | opencode-pilot test-mapping linear
 `);
 }
 
@@ -239,8 +244,9 @@ async function setupCommand() {
   console.log("");
   console.log("Setup complete!");
   console.log("");
-  console.log("Configure notifications (optional):");
-  console.log("  Set NTFY_TOPIC environment variable or in ~/.config/opencode-pilot/config.json");
+  console.log("Next steps:");
+  console.log("  1. Edit ~/.config/opencode-pilot/config.yaml");
+  console.log("  2. Run: opencode-pilot start");
 }
 
 // ============================================================================
@@ -334,12 +340,420 @@ function statusCommand() {
   // Polling configuration
   console.log("");
   console.log("Polling Configuration:");
-  if (existsSync(DEFAULT_REPOS_CONFIG)) {
-    console.log(`  repos.yaml: ${DEFAULT_REPOS_CONFIG}`);
+  if (existsSync(PILOT_CONFIG_FILE)) {
+    console.log(`  config.yaml: ${PILOT_CONFIG_FILE}`);
     console.log("  polling: enabled (handled by service)");
   } else {
-    console.log(`  repos.yaml: not found at ${DEFAULT_REPOS_CONFIG}`);
+    console.log(`  config.yaml: not found at ${PILOT_CONFIG_FILE}`);
     console.log("  polling: disabled");
+  }
+}
+
+// ============================================================================
+// Config Command
+// ============================================================================
+
+async function configCommand() {
+  console.log("opencode-pilot configuration");
+  console.log("============================");
+  console.log("");
+
+  // Check config file exists
+  if (!existsSync(PILOT_CONFIG_FILE)) {
+    console.log(`Config file not found: ${PILOT_CONFIG_FILE}`);
+    console.log("");
+    console.log("Create one by copying the example:");
+    console.log("  cp node_modules/opencode-pilot/examples/config.yaml ~/.config/opencode-pilot/config.yaml");
+    process.exit(1);
+  }
+
+  // Load and parse config
+  let config;
+  try {
+    const { default: YAML } = await import("yaml");
+    const content = readFileSync(PILOT_CONFIG_FILE, "utf8");
+    config = YAML.parse(content);
+    console.log("✓ Config file parsed successfully");
+  } catch (err) {
+    console.log(`✗ Failed to parse config: ${err.message}`);
+    process.exit(1);
+  }
+
+  // Validate notifications section
+  console.log("");
+  console.log("Notifications:");
+  const notifications = config.notifications || {};
+  if (notifications.topic) {
+    console.log(`  ✓ topic: ${notifications.topic.substring(0, 8)}...`);
+  } else {
+    console.log("  ✗ topic: not set (required for notifications)");
+  }
+  console.log(`  server: ${notifications.server || "https://ntfy.sh"}`);
+  if (notifications.callback_host) {
+    console.log(`  ✓ callback_host: ${notifications.callback_host}`);
+  } else {
+    console.log("  ⚠ callback_host: not set (interactive notifications disabled)");
+  }
+
+  // Validate defaults section
+  console.log("");
+  console.log("Defaults:");
+  const defaults = config.defaults || {};
+  console.log(`  working_dir: ${defaults.working_dir || "~"}`);
+  console.log(`  prompt: ${defaults.prompt || "default"}`);
+  if (defaults.agent) console.log(`  agent: ${defaults.agent}`);
+  if (defaults.model) console.log(`  model: ${defaults.model}`);
+
+  // Validate repos section
+  console.log("");
+  console.log("Repos:");
+  const repos = config.repos || {};
+  const repoKeys = Object.keys(repos);
+  if (repoKeys.length === 0) {
+    console.log("  (none configured)");
+  } else {
+    for (const key of repoKeys) {
+      const repo = repos[key];
+      const isPrefix = key.endsWith("/");
+      const path = repo.path || repo.repo_path;
+      const expandedPath = path ? path.replace("~", os.homedir()).replace("{repo}", "<repo>") : "<not set>";
+      const pathExists = path && !path.includes("{repo}") ? existsSync(path.replace("~", os.homedir())) : null;
+      
+      if (pathExists === false) {
+        console.log(`  ✗ ${key}: ${expandedPath} (path not found)`);
+      } else if (isPrefix) {
+        console.log(`  ${key}: ${expandedPath} (prefix)`);
+      } else {
+        console.log(`  ✓ ${key}: ${expandedPath}`);
+      }
+    }
+  }
+
+  // Validate sources section
+  console.log("");
+  console.log("Sources:");
+  const sources = config.sources || [];
+  if (sources.length === 0) {
+    console.log("  (none configured)");
+  } else {
+    for (const source of sources) {
+      const name = source.name || "<unnamed>";
+      const tool = source.tool;
+      
+      if (!tool || !tool.mcp || !tool.name) {
+        console.log(`  ✗ ${name}: missing tool.mcp or tool.name`);
+        continue;
+      }
+      
+      const itemId = source.item?.id;
+      if (!itemId) {
+        console.log(`  ⚠ ${name}: ${tool.mcp}/${tool.name} (no item.id template)`);
+      } else {
+        console.log(`  ✓ ${name}: ${tool.mcp}/${tool.name}`);
+      }
+      
+      // Show repo resolution
+      if (source.repo) {
+        console.log(`      repo: ${source.repo}`);
+      } else if (source.repos) {
+        console.log(`      repos: ${Array.isArray(source.repos) ? source.repos.join(", ") : JSON.stringify(source.repos)}`);
+      } else if (source.working_dir) {
+        console.log(`      working_dir: ${source.working_dir}`);
+      } else {
+        console.log(`      (uses defaults.working_dir)`);
+      }
+    }
+  }
+
+  // Validate templates
+  console.log("");
+  console.log("Templates:");
+  if (!existsSync(PILOT_TEMPLATES_DIR)) {
+    console.log(`  ⚠ Templates directory not found: ${PILOT_TEMPLATES_DIR}`);
+  } else {
+    const { readdirSync } = await import("fs");
+    const templates = readdirSync(PILOT_TEMPLATES_DIR).filter(f => f.endsWith(".md"));
+    if (templates.length === 0) {
+      console.log("  (no templates found)");
+    } else {
+      for (const t of templates) {
+        console.log(`  ✓ ${t.replace(".md", "")}`);
+      }
+    }
+    
+    // Check if referenced templates exist
+    const referencedTemplates = new Set();
+    if (defaults.prompt) referencedTemplates.add(defaults.prompt);
+    for (const repo of Object.values(repos)) {
+      if (repo.prompt) referencedTemplates.add(repo.prompt);
+    }
+    for (const source of sources) {
+      if (source.prompt) referencedTemplates.add(source.prompt);
+    }
+    
+    const existingTemplates = new Set(templates.map(t => t.replace(".md", "")));
+    for (const ref of referencedTemplates) {
+      if (!existingTemplates.has(ref)) {
+        console.log(`  ✗ ${ref} (referenced but not found)`);
+      }
+    }
+  }
+
+  console.log("");
+  console.log("Configuration valid!");
+}
+
+// ============================================================================
+// Test Source Command
+// ============================================================================
+
+async function testSourceCommand(sourceName) {
+  if (!sourceName) {
+    console.error("Usage: opencode-pilot test-source <source-name>");
+    console.error("");
+    console.error("Available sources:");
+    
+    // Load and show available sources
+    if (existsSync(PILOT_CONFIG_FILE)) {
+      try {
+        const { default: YAML } = await import("yaml");
+        const content = readFileSync(PILOT_CONFIG_FILE, "utf8");
+        const config = YAML.parse(content);
+        const sources = config.sources || [];
+        if (sources.length === 0) {
+          console.error("  (no sources configured)");
+        } else {
+          for (const s of sources) {
+            console.error(`  ${s.name}`);
+          }
+        }
+      } catch (err) {
+        console.error(`  Error loading config: ${err.message}`);
+      }
+    } else {
+      console.error("  (config file not found)");
+    }
+    process.exit(1);
+  }
+
+  console.log(`Testing source: ${sourceName}`);
+  console.log("=".repeat(40));
+  console.log("");
+
+  // Load config
+  if (!existsSync(PILOT_CONFIG_FILE)) {
+    console.error(`Config file not found: ${PILOT_CONFIG_FILE}`);
+    process.exit(1);
+  }
+
+  const { default: YAML } = await import("yaml");
+  const content = readFileSync(PILOT_CONFIG_FILE, "utf8");
+  const config = YAML.parse(content);
+
+  // Find source
+  const sources = config.sources || [];
+  const source = sources.find(s => s.name === sourceName);
+  
+  if (!source) {
+    console.error(`Source not found: ${sourceName}`);
+    console.error("");
+    console.error("Available sources:");
+    for (const s of sources) {
+      console.error(`  ${s.name}`);
+    }
+    process.exit(1);
+  }
+
+  // Show source config
+  console.log("Source Configuration:");
+  console.log(`  name: ${source.name}`);
+  console.log(`  tool.mcp: ${source.tool?.mcp || "(not set)"}`);
+  console.log(`  tool.name: ${source.tool?.name || "(not set)"}`);
+  console.log(`  args: ${JSON.stringify(source.args || {})}`);
+  console.log(`  item.id: ${source.item?.id || "(not set)"}`);
+  if (source.repo) console.log(`  repo: ${source.repo}`);
+  if (source.working_dir) console.log(`  working_dir: ${source.working_dir}`);
+  if (source.prompt) console.log(`  prompt: ${source.prompt}`);
+  if (source.agent) console.log(`  agent: ${source.agent}`);
+
+  // Show mappings
+  const tools = config.tools || {};
+  const provider = source.tool?.mcp;
+  const mappings = tools[provider]?.mappings;
+  
+  console.log("");
+  console.log("Field Mappings:");
+  if (mappings) {
+    for (const [target, sourcePath] of Object.entries(mappings)) {
+      console.log(`  ${target} ← ${sourcePath}`);
+    }
+  } else {
+    console.log(`  (no mappings configured for provider '${provider}')`);
+  }
+
+  // Fetch items
+  console.log("");
+  console.log("Fetching items...");
+  
+  try {
+    // Import poller
+    const pollerPath = join(serviceDir, "poller.js");
+    const { pollGenericSource, applyMappings } = await import(pollerPath);
+    const { getToolMappings } = await import(join(serviceDir, "repo-config.js"));
+    
+    // Fetch items with mappings applied
+    const items = await pollGenericSource(source, { mappings });
+    
+    console.log(`Found ${items.length} item(s)`);
+    console.log("");
+
+    // Show first few items
+    const maxItems = 3;
+    for (let i = 0; i < Math.min(items.length, maxItems); i++) {
+      const item = items[i];
+      console.log(`Item ${i + 1}:`);
+      console.log("  Raw fields:");
+      for (const [key, value] of Object.entries(item)) {
+        const displayValue = typeof value === "object" 
+          ? JSON.stringify(value) 
+          : String(value);
+        const truncated = displayValue.length > 60 
+          ? displayValue.substring(0, 57) + "..." 
+          : displayValue;
+        console.log(`    ${key}: ${truncated}`);
+      }
+      
+      // Apply mappings
+      if (mappings) {
+        const mapped = applyMappings(item, mappings);
+        console.log("  After mappings:");
+        // Show mapped fields that are different
+        for (const [target] of Object.entries(mappings)) {
+          if (mapped[target] !== undefined) {
+            const displayValue = typeof mapped[target] === "object"
+              ? JSON.stringify(mapped[target])
+              : String(mapped[target]);
+            const truncated = displayValue.length > 60
+              ? displayValue.substring(0, 57) + "..."
+              : displayValue;
+            console.log(`    ${target}: ${truncated}`);
+          }
+        }
+      }
+      console.log("");
+    }
+
+    if (items.length > maxItems) {
+      console.log(`... and ${items.length - maxItems} more item(s)`);
+    }
+
+  } catch (err) {
+    console.error(`Error fetching items: ${err.message}`);
+    if (err.stack) {
+      console.error("");
+      console.error("Stack trace:");
+      console.error(err.stack);
+    }
+    process.exit(1);
+  }
+}
+
+// ============================================================================
+// Test Mapping Command
+// ============================================================================
+
+async function testMappingCommand(mcpName) {
+  if (!mcpName) {
+    console.error("Usage: echo '<json>' | opencode-pilot test-mapping <mcp-name>");
+    console.error("");
+    console.error("Test field mappings by piping JSON and specifying the MCP server name.");
+    console.error("");
+    console.error("Example:");
+    console.error('  echo \'{"url":"https://linear.app/team/issue/PROJ-123/title","title":"Fix bug"}\' | opencode-pilot test-mapping linear');
+    console.error("");
+    
+    // Show available tools with mappings
+    const { loadRepoConfig, getToolMappings } = await import(join(serviceDir, "repo-config.js"));
+    loadRepoConfig(PILOT_CONFIG_FILE);
+    
+    console.error("Configured MCP servers with mappings:");
+    for (const name of ["github", "linear"]) {
+      const mappings = getToolMappings(name);
+      if (mappings && Object.keys(mappings).length > 0) {
+        console.error(`  ${name}:`);
+        for (const [target, source] of Object.entries(mappings)) {
+          console.error(`    ${target} ← ${source}`);
+        }
+      }
+    }
+    process.exit(1);
+  }
+
+  // Read JSON from stdin
+  const chunks = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk);
+  }
+  const input = Buffer.concat(chunks).toString().trim();
+  
+  if (!input) {
+    console.error("Error: No JSON input provided. Pipe JSON to stdin.");
+    console.error("");
+    console.error("Example:");
+    console.error('  echo \'{"url":"https://linear.app/team/issue/PROJ-123/title"}\' | opencode-pilot test-mapping linear');
+    process.exit(1);
+  }
+
+  let item;
+  try {
+    item = JSON.parse(input);
+  } catch (err) {
+    console.error(`Error parsing JSON: ${err.message}`);
+    process.exit(1);
+  }
+
+  // Load mappings
+  const { loadRepoConfig, getToolMappings } = await import(join(serviceDir, "repo-config.js"));
+  const { applyMappings } = await import(join(serviceDir, "poller.js"));
+  
+  loadRepoConfig(PILOT_CONFIG_FILE);
+  const mappings = getToolMappings(mcpName);
+
+  if (!mappings || Object.keys(mappings).length === 0) {
+    console.error(`No mappings configured for MCP server: ${mcpName}`);
+    console.error("");
+    console.error("Add mappings to your config.yaml:");
+    console.error("  tools:");
+    console.error(`    ${mcpName}:`);
+    console.error("      mappings:");
+    console.error('        number: "url:/([A-Z0-9]+-[0-9]+)/"');
+    process.exit(1);
+  }
+
+  console.log("Input:");
+  for (const [key, value] of Object.entries(item)) {
+    const displayValue = typeof value === "object" ? JSON.stringify(value) : String(value);
+    const truncated = displayValue.length > 60 ? displayValue.substring(0, 57) + "..." : displayValue;
+    console.log(`  ${key}: ${truncated}`);
+  }
+  console.log("");
+
+  console.log(`Mappings (${mcpName}):`);
+  for (const [target, source] of Object.entries(mappings)) {
+    console.log(`  ${target} ← ${source}`);
+  }
+  console.log("");
+
+  const mapped = applyMappings(item, mappings);
+
+  console.log("Result:");
+  for (const [target] of Object.entries(mappings)) {
+    const value = mapped[target];
+    if (value !== undefined) {
+      console.log(`  ${target}: ${value}`);
+    } else {
+      console.log(`  ${target}: (undefined - no match)`);
+    }
   }
 }
 
@@ -367,6 +781,18 @@ async function main() {
 
     case "status":
       statusCommand();
+      break;
+
+    case "config":
+      await configCommand();
+      break;
+
+    case "test-source":
+      await testSourceCommand(subcommand);
+      break;
+
+    case "test-mapping":
+      await testMappingCommand(subcommand);
       break;
 
     default:

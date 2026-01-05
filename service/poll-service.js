@@ -9,8 +9,8 @@
  * 5. Track processed items to avoid duplicates
  */
 
-import { loadRepoConfig, getRepoConfig, getAllSources } from "./repo-config.js";
-import { createPoller, pollSource } from "./poller.js";
+import { loadRepoConfig, getRepoConfig, getAllSources, getToolMappings } from "./repo-config.js";
+import { createPoller, pollGenericSource } from "./poller.js";
 import { evaluateReadiness, sortByPriority } from "./readiness.js";
 import { executeAction, buildCommand } from "./actions.js";
 import { debug } from "./logger.js";
@@ -19,6 +19,38 @@ import os from "os";
 
 // Default configuration
 const DEFAULT_POLL_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Check if a source has tool configuration
+ * @param {object} source - Source configuration
+ * @returns {boolean} True if source has tool.mcp and tool.name
+ */
+export function hasToolConfig(source) {
+  return !!(source.tool && source.tool.mcp && source.tool.name);
+}
+
+/**
+ * Build action config from source and repo config
+ * Source fields override repo config fields
+ * @param {object} source - Source configuration
+ * @param {object} repoConfig - Repository configuration
+ * @returns {object} Merged action config
+ */
+export function buildActionConfigFromSource(source, repoConfig) {
+  return {
+    // Repo config as base
+    ...repoConfig,
+    // Normalize path to repo_path
+    repo_path: source.working_dir || repoConfig.path || repoConfig.repo_path,
+    // Session from source or repo
+    session: source.session || repoConfig.session || {},
+    // Source-level overrides (highest priority)
+    ...(source.prompt && { prompt: source.prompt }),
+    ...(source.agent && { agent: source.agent }),
+    ...(source.model && { model: source.model }),
+    ...(source.working_dir && { working_dir: source.working_dir }),
+  };
+}
 
 // Global state
 let pollingInterval = null;
@@ -29,7 +61,7 @@ let pollerInstance = null;
  * @param {object} options - Poll options
  * @param {boolean} [options.dryRun] - If true, don't execute actions
  * @param {boolean} [options.skipMcp] - If true, skip MCP fetching (for testing)
- * @param {string} [options.configPath] - Path to repos.yaml
+ * @param {string} [options.configPath] - Path to config.yaml
  * @returns {Promise<Array>} Results of actions taken
  */
 export async function pollOnce(options = {}) {
@@ -48,33 +80,31 @@ export async function pollOnce(options = {}) {
   const sources = getAllSources();
 
   if (sources.length === 0) {
-    console.log("[poll] No sources configured");
+    debug("No sources configured");
     return results;
   }
 
   // Process each source
   for (const source of sources) {
-    const repoKey = source.repo_key;
-    const repoPath = source.repo_path;
-    const sourceType = source.type;
+    const sourceName = source.name || 'unknown';
+    const repoKey = source.name || 'default';
+    const repoConfig = getRepoConfig(repoKey) || {};
 
-    // Get repo config for readiness evaluation
-    const repoConfig = getRepoConfig(repoKey);
+    if (!hasToolConfig(source)) {
+      console.error(`[poll] Source '${sourceName}' missing tool configuration (requires tool.mcp and tool.name)`);
+      continue;
+    }
 
     let items = [];
 
     // Fetch items from source
     if (!skipMcp) {
       try {
-        // Include repo in fetch options for proper filtering
-        const fetchOpts = {
-          ...source.fetch,
-          repo: source.fetch?.repo || repoKey,
-        };
-        items = await pollSource(sourceType, fetchOpts);
-        console.log(`[poll] Fetched ${items.length} items from ${sourceType} for ${repoKey}`);
+        const mappings = getToolMappings(source.tool.mcp);
+        items = await pollGenericSource(source, { mappings });
+        debug(`Fetched ${items.length} items from ${sourceName}`);
       } catch (err) {
-        console.error(`[poll] Error fetching from ${sourceType}: ${err.message}`);
+        console.error(`[poll] Error fetching from ${sourceName}: ${err.message}`);
         continue;
       }
     }
@@ -87,7 +117,6 @@ export async function pollOnce(options = {}) {
         return {
           ...item,
           repo_key: repoKey,
-          repo_path: repoPath,
           repo_short: repoKey.split("/").pop(),
           _readiness: readiness,
         };
@@ -109,12 +138,8 @@ export async function pollOnce(options = {}) {
       }
 
       debug(`Executing action for ${item.id}`);
-      // Build action config
-      const actionConfig = {
-        ...repoConfig,
-        repo_path: repoPath,
-        session: source.session || repoConfig.session || {},
-      };
+      // Build action config from source (includes agent, model, prompt, working_dir)
+      const actionConfig = buildActionConfigFromSource(source, repoConfig);
 
       // Execute or dry-run
       if (dryRun) {
@@ -160,7 +185,7 @@ export async function pollOnce(options = {}) {
  * Start the polling loop
  * @param {object} options - Polling options
  * @param {number} [options.interval] - Poll interval in ms
- * @param {string} [options.configPath] - Path to repos.yaml
+ * @param {string} [options.configPath] - Path to config.yaml
  * @returns {object} Polling state with stop() method
  */
 export function startPolling(options = {}) {

@@ -1,11 +1,10 @@
 // opencode-pilot - ntfy notification plugin for OpenCode
 //
 // This plugin sends notifications via ntfy.sh when:
-// - Permission requests need approval (interactive, requires callbackHost)
 // - Session goes idle after delay
 // - Errors or retries occur
 //
-// Configuration via ~/.config/opencode-pilot/config.json or environment variables.
+// Configuration via ~/.config/opencode-pilot/config.yaml
 // See README.md for full configuration options.
 
 import { basename } from 'path'

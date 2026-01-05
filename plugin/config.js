@@ -1,62 +1,59 @@
 // Configuration management for opencode-pilot
-// Reads from ~/.config/opencode-pilot/config.json, with env var overrides
+// Reads from ~/.config/opencode-pilot/config.yaml
 //
-// Example config file (~/.config/opencode-pilot/config.json):
-// {
-//   "topic": "my-secret-topic",
-//   "server": "https://ntfy.sh",
-//   "token": "tk_xxx",
-//   "callbackHost": "myhost.ts.net",
-//   "callbackPort": 4097,
-//   "idleDelayMs": 300000,
-//   "debug": true,
-//   "debugPath": "/custom/path/debug.log"
-// }
+// Example config file (~/.config/opencode-pilot/config.yaml):
+// notifications:
+//   topic: my-secret-topic
+//   server: https://ntfy.sh
+//   idle_delay_ms: 300000
+//   debug: true
 
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import YAML from 'yaml'
 
-const CONFIG_PATH = join(homedir(), '.config', 'opencode-pilot', 'config.json')
+const DEFAULT_CONFIG_PATH = join(homedir(), '.config', 'opencode-pilot', 'config.yaml')
 
 /**
- * Load configuration from config file and environment
- * Priority: env vars > config.json > defaults
+ * Load configuration from config file
+ * @param {string} [configPath] - Optional path to config file (for testing)
  */
-export function loadConfig() {
-  // Load config.json if it exists
+export function loadConfig(configPath) {
+  const actualPath = configPath || DEFAULT_CONFIG_PATH
+  
+  // Load config.yaml if it exists
   let fileConfig = {}
-  if (existsSync(CONFIG_PATH)) {
+  if (existsSync(actualPath)) {
     try {
-      const content = readFileSync(CONFIG_PATH, 'utf8')
-      fileConfig = JSON.parse(content)
+      const content = readFileSync(actualPath, 'utf8')
+      const parsed = YAML.parse(content)
+      // Extract notifications section
+      fileConfig = parsed?.notifications || {}
     } catch (err) {
       // Silently ignore parse errors
     }
   }
 
-  // Helper to get value with priority: env > file > default
-  const get = (envKey, fileKey, defaultValue) => {
-    if (process.env[envKey] !== undefined && process.env[envKey] !== '') {
-      return process.env[envKey]
-    }
-    if (fileConfig[fileKey] !== undefined && fileConfig[fileKey] !== '') {
-      return fileConfig[fileKey]
+  // Helper to get value with default
+  const get = (key, defaultValue) => {
+    if (fileConfig[key] !== undefined && fileConfig[key] !== '') {
+      return fileConfig[key]
     }
     return defaultValue
   }
 
   // Helper to parse boolean
-  const getBool = (envKey, fileKey, defaultValue) => {
-    const value = get(envKey, fileKey, undefined)
+  const getBool = (key, defaultValue) => {
+    const value = get(key, undefined)
     if (value === undefined) return defaultValue
     if (typeof value === 'boolean') return value
     return String(value).toLowerCase() !== 'false' && String(value) !== '0'
   }
 
   // Helper to parse int
-  const getInt = (envKey, fileKey, defaultValue) => {
-    const value = get(envKey, fileKey, undefined)
+  const getInt = (key, defaultValue) => {
+    const value = get(key, undefined)
     if (value === undefined) return defaultValue
     if (typeof value === 'number') return value
     const parsed = parseInt(String(value), 10)
@@ -64,28 +61,16 @@ export function loadConfig() {
   }
 
   return {
-    topic: get('NTFY_TOPIC', 'topic', null),
-    server: get('NTFY_SERVER', 'server', 'https://ntfy.sh'),
-    authToken: get('NTFY_TOKEN', 'token', null),
-    callbackHost: get('NTFY_CALLBACK_HOST', 'callbackHost', null),
-    callbackPort: getInt('NTFY_CALLBACK_PORT', 'callbackPort', 4097),
-    callbackHttps: getBool('NTFY_CALLBACK_HTTPS', 'callbackHttps', false),
-    idleDelayMs: getInt('NTFY_IDLE_DELAY_MS', 'idleDelayMs', 300000),
-    errorNotify: getBool('NTFY_ERROR_NOTIFY', 'errorNotify', true),
-    errorDebounceMs: getInt('NTFY_ERROR_DEBOUNCE_MS', 'errorDebounceMs', 60000),
-    retryNotifyFirst: getBool('NTFY_RETRY_NOTIFY_FIRST', 'retryNotifyFirst', true),
-    retryNotifyAfter: getInt('NTFY_RETRY_NOTIFY_AFTER', 'retryNotifyAfter', 3),
-    idleNotify: getBool('NTFY_IDLE_NOTIFY', 'idleNotify', true),
-    debug: getBool('NTFY_DEBUG', 'debug', false),
-    debugPath: get('NTFY_DEBUG_PATH', 'debugPath', null),
+    topic: get('topic', null),
+    server: get('server', 'https://ntfy.sh'),
+    authToken: get('token', null),
+    idleDelayMs: getInt('idle_delay_ms', 300000),
+    errorNotify: getBool('error_notify', true),
+    errorDebounceMs: getInt('error_debounce_ms', 60000),
+    retryNotifyFirst: getBool('retry_notify_first', true),
+    retryNotifyAfter: getInt('retry_notify_after', 3),
+    idleNotify: getBool('idle_notify', true),
+    debug: getBool('debug', false),
+    debugPath: get('debug_path', null),
   }
-}
-
-/**
- * Get the callback host from config
- * @param {Object} config - Config object from loadConfig()
- * @returns {string|null} The callback host, or null if not configured
- */
-export function getCallbackHost(config) {
-  return config.callbackHost || null
 }

@@ -12,137 +12,112 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { getNestedValue } from "./utils.js";
 
-// Source type to MCP server mapping
-const SOURCE_TO_MCP = {
-  github_issue: "github",
-  github_pr: "github",
-  linear_issue: "linear",
-};
+/**
+ * Expand template string with item fields
+ * Supports {field} and {field.nested} syntax
+ * @param {string} template - Template with {placeholders}
+ * @param {object} item - Item with fields to substitute
+ * @returns {string} Expanded string
+ */
+export function expandItemId(template, item) {
+  return template.replace(/\{([^}]+)\}/g, (match, fieldPath) => {
+    const value = getNestedValue(item, fieldPath);
+    return value !== undefined ? String(value) : match;
+  });
+}
 
-// Tool mappings per source type
-const TOOL_MAPPINGS = {
-  github_issue: {
-    tool: "search_issues",
-    buildQuery: (opts) => {
-      const parts = ["is:issue"];
-      if (opts.assignee) parts.push(`assignee:${opts.assignee}`);
-      if (opts.state) parts.push(`state:${opts.state}`);
-      if (opts.repo) parts.push(`repo:${opts.repo}`);
-      if (opts.org) parts.push(`org:${opts.org}`);
-      if (opts.labels?.length)
-        opts.labels.forEach((l) => parts.push(`label:${l}`));
-      return { q: parts.join(" ") };
-    },
-    transform: (result) => {
-      const text = result.content?.[0]?.text;
-      if (!text) return [];
-      const items = parseJsonArray(text, "github_issue");
-      return items.map((item) => ({
-        id: `github:${item.repository?.full_name || "unknown"}#${item.number}`,
-        number: item.number,
-        title: item.title,
-        body: item.body,
-        html_url: item.html_url || item.url,
-        repository: {
-          full_name:
-            item.repository?.full_name ||
-            `${item.repository?.owner?.login || item.repository?.owner}/${item.repository?.name}`,
-          name: item.repository?.name,
-        },
-        labels: item.labels || [],
-        assignees: item.assignees || [],
-      }));
-    },
-  },
-  github_pr: {
-    tool: "search_issues",
-    buildQuery: (opts) => {
-      const parts = ["is:pr"];
-      if (opts.review_requested)
-        parts.push(`review-requested:${opts.review_requested}`);
-      if (opts.state) parts.push(`state:${opts.state}`);
-      if (opts.repo) parts.push(`repo:${opts.repo}`);
-      if (opts.org) parts.push(`org:${opts.org}`);
-      return { q: parts.join(" ") };
-    },
-    transform: (result) => {
-      const text = result.content?.[0]?.text;
-      if (!text) return [];
-      const items = parseJsonArray(text, "github_pr");
-      return items.map((item) => ({
-        id: `github:${item.repository?.full_name || "unknown"}#${item.number}`,
-        number: item.number,
-        title: item.title,
-        body: item.body,
-        html_url: item.html_url || item.url,
-        repository: {
-          full_name: item.repository?.full_name,
-          name: item.repository?.name,
-        },
-        labels: item.labels || [],
-        headRefName: item.head?.ref || "",
-      }));
-    },
-  },
-  linear_issue: {
-    tool: null,
-    toolCandidates: [
-      "list_my_issues",
-      "get_my_issues",
-      "search_issues",
-      "list_issues",
-      "linear_search_issues",
-      "linear_list_issues",
-    ],
-    buildQuery: (opts) => {
-      const query = {};
-      if (opts.assignee === "@me") {
-        query.assignedToMe = true;
+/**
+ * Apply field mappings to an item
+ * Mappings define how to map source fields to standard fields
+ * 
+ * Supports:
+ * - Simple path: "fieldName" or "nested.field.path"
+ * - Regex extraction: "url:/issue/([A-Z]+-\d+)/" extracts from url field using regex
+ * 
+ * @param {object} item - Raw item from MCP tool
+ * @param {object|null} mappings - Field mappings { targetField: "source.field.path" }
+ * @returns {object} Item with mapped fields added (original fields preserved)
+ */
+export function applyMappings(item, mappings) {
+  if (!mappings) return item;
+
+  const result = { ...item };
+
+  for (const [targetField, sourcePath] of Object.entries(mappings)) {
+    // Check for regex extraction syntax: "field:/regex/"
+    const regexMatch = sourcePath.match(/^(\w+):\/(.+)\/$/);
+    if (regexMatch) {
+      const [, field, pattern] = regexMatch;
+      const fieldValue = getNestedValue(item, field);
+      if (fieldValue) {
+        const regex = new RegExp(pattern);
+        const match = String(fieldValue).match(regex);
+        result[targetField] = match ? (match[1] || match[0]) : undefined;
       }
-      if (Array.isArray(opts.state)) {
-        query.status = opts.state;
-      }
-      return query;
-    },
-    transform: (result) => {
-      const text = result.content?.[0]?.text;
-      if (!text) return [];
-      const items = parseJsonArray(text, "linear_issue");
-      return items.map((item) => ({
-        id: `linear:${item.identifier || item.id}`,
-        identifier: item.identifier,
-        title: item.title,
-        description: item.description,
-        url: item.url,
-        team: item.team,
-        labels: item.labels || [],
-        state: item.state,
-      }));
-    },
-  },
-};
+    } else {
+      // Simple field path
+      result[targetField] = getNestedValue(item, sourcePath);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Get tool configuration from a source
+ * @param {object} source - Source configuration from config.yaml
+ * @returns {object} Tool configuration
+ */
+export function getToolConfig(source) {
+  if (!source.tool || !source.tool.mcp || !source.tool.name) {
+    throw new Error(`Source '${source.name || 'unknown'}' missing tool configuration (requires tool.mcp and tool.name)`);
+  }
+
+  return {
+    mcpServer: source.tool.mcp,
+    toolName: source.tool.name,
+    args: source.args || {},
+    idTemplate: source.item?.id || null,
+  };
+}
+
+/**
+ * Transform items by adding IDs using template
+ * @param {Array} items - Raw items from MCP tool
+ * @param {string|null} idTemplate - Template for generating IDs
+ * @returns {Array} Items with id field added
+ */
+export function transformItems(items, idTemplate) {
+  let counter = 0;
+  return items.map((item) => {
+    let id;
+    if (idTemplate) {
+      id = expandItemId(idTemplate, item);
+    } else if (item.id) {
+      id = item.id;
+    } else {
+      // Generate a fallback ID
+      id = `item-${Date.now()}-${counter++}`;
+    }
+    return { ...item, id };
+  });
+}
 
 /**
  * Parse JSON text as an array with error handling
  */
-function parseJsonArray(text, sourceType) {
+function parseJsonArray(text, sourceName) {
   try {
-    const parsed = JSON.parse(text);
-    if (parsed && Array.isArray(parsed.items)) {
-      return parsed.items;
-    }
-    if (Array.isArray(parsed)) {
-      return parsed;
-    }
-    console.error(
-      `Warning: MCP response for ${sourceType} is not an array, returning empty`
-    );
-    return [];
+    const data = JSON.parse(text);
+    if (Array.isArray(data)) return data;
+    if (data.items) return data.items;
+    if (data.issues) return data.issues;
+    if (data.nodes) return data.nodes;
+    return [data];
   } catch (err) {
-    console.error(
-      `Warning: Failed to parse MCP response for ${sourceType}: ${err.message}`
-    );
+    console.error(`[poller] Failed to parse ${sourceName} response:`, err.message);
     return [];
   }
 }
@@ -225,27 +200,24 @@ function createTimeout(ms, operation) {
 }
 
 /**
- * Poll a single source and return items
+ * Poll a source using MCP tools
  * 
- * @param {string} sourceType - Source type (github_issue, github_pr, linear_issue)
- * @param {object} options - Fetch options for the source
+ * @param {object} source - Source configuration from config.yaml
+ * @param {object} [options] - Additional options
  * @param {number} [options.timeout] - Timeout in ms (default: 30000)
- * @param {string} [configPath] - Optional path to opencode.json
- * @returns {Promise<Array>} Array of items from the source
+ * @param {string} [options.opencodeConfigPath] - Path to opencode.json for MCP config
+ * @param {object} [options.mappings] - Field mappings to apply to items
+ * @returns {Promise<Array>} Array of items from the source with IDs and mappings applied
  */
-export async function pollSource(sourceType, options = {}, configPath) {
-  const mcpServerName = SOURCE_TO_MCP[sourceType];
-  if (!mcpServerName) {
-    throw new Error(`Unknown source type: ${sourceType}`);
-  }
-
+export async function pollGenericSource(source, options = {}) {
+  const toolConfig = getToolConfig(source);
   const timeout = options.timeout || DEFAULT_MCP_TIMEOUT;
-  const mcpConfig = getMcpConfig(mcpServerName, configPath);
+  const mappings = options.mappings || null;
+  const mcpConfig = getMcpConfig(toolConfig.mcpServer, options.opencodeConfigPath);
   const client = new Client({ name: "opencode-pilot", version: "1.0.0" });
-  let transport;
 
   try {
-    transport = await createTransport(mcpConfig);
+    const transport = await createTransport(mcpConfig);
     
     // Connect with timeout
     await Promise.race([
@@ -253,37 +225,32 @@ export async function pollSource(sourceType, options = {}, configPath) {
       createTimeout(timeout, "MCP connection"),
     ]);
 
-    const mapping = TOOL_MAPPINGS[sourceType];
-    let toolName = mapping.tool;
-
-    // Discover tool name if not fixed (with timeout)
-    if (!toolName && mapping.toolCandidates) {
-      const tools = await Promise.race([
-        client.listTools(),
-        createTimeout(timeout, "listTools"),
-      ]);
-      const availableNames = tools.tools.map((t) => t.name);
-      toolName = mapping.toolCandidates.find((c) => availableNames.includes(c));
-
-      if (!toolName) {
-        throw new Error(
-          `No matching tool found for ${sourceType}. Available: ${availableNames.join(", ")}`
-        );
-      }
-    }
-
-    const params = mapping.buildQuery(options);
-    
-    // Call tool with timeout
+    // Call the tool directly with provided args
     const result = await Promise.race([
-      client.callTool({ name: toolName, arguments: params }),
+      client.callTool({ name: toolConfig.toolName, arguments: toolConfig.args }),
       createTimeout(timeout, "callTool"),
     ]);
+
+    // Parse the response
+    const text = result.content?.[0]?.text;
+    if (!text) return [];
     
-    return mapping.transform(result);
+    const rawItems = parseJsonArray(text, source.name);
+    
+    // Apply field mappings before transforming
+    const mappedItems = mappings 
+      ? rawItems.map(item => applyMappings(item, mappings))
+      : rawItems;
+    
+    // Transform items (add IDs)
+    return transformItems(mappedItems, toolConfig.idTemplate);
   } finally {
     try {
-      await client.close();
+      // Close with timeout to prevent hanging on unresponsive MCP servers
+      await Promise.race([
+        client.close(),
+        new Promise(resolve => setTimeout(resolve, 3000)),
+      ]);
     } catch {
       // Ignore close errors
     }
@@ -299,74 +266,74 @@ export async function pollSource(sourceType, options = {}, configPath) {
  * @returns {object} Poller instance
  */
 export function createPoller(options = {}) {
-  const stateFile = options.stateFile || path.join(os.homedir(), ".cache/opencode-pilot/poll-state.json");
+  const stateFile = options.stateFile || path.join(os.homedir(), '.config/opencode-pilot/poll-state.json');
   const configPath = options.configPath;
   
-  // Ensure state directory exists
-  const stateDir = path.dirname(stateFile);
-  if (!fs.existsSync(stateDir)) {
-    fs.mkdirSync(stateDir, { recursive: true });
-  }
-
   // Load existing state
-  let processed = {};
+  let processedItems = new Map();
   if (fs.existsSync(stateFile)) {
     try {
-      processed = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+      const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+      if (state.processed) {
+        processedItems = new Map(Object.entries(state.processed));
+      }
     } catch {
-      processed = {};
+      // Start fresh if state is corrupted
     }
   }
-
-  /**
-   * Save state to file
-   */
+  
   function saveState() {
-    fs.writeFileSync(stateFile, JSON.stringify(processed, null, 2));
-  }
-
-  /**
-   * Check if an item has been processed
-   */
-  function isProcessed(itemId) {
-    return !!processed[itemId];
-  }
-
-  /**
-   * Mark an item as processed
-   */
-  function markProcessed(itemId, metadata = {}) {
-    processed[itemId] = {
-      processedAt: new Date().toISOString(),
-      ...metadata,
+    const dir = path.dirname(stateFile);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const state = {
+      processed: Object.fromEntries(processedItems),
+      savedAt: new Date().toISOString(),
     };
-    saveState();
+    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
   }
-
-  /**
-   * Poll a source and return only new (unprocessed) items
-   */
-  async function pollNew(sourceType, options = {}) {
-    const items = await pollSource(sourceType, options, configPath);
-    return items.filter((item) => !isProcessed(item.id));
-  }
-
-  /**
-   * Clear processed state for testing
-   */
-  function clearState() {
-    processed = {};
-    saveState();
-  }
-
+  
   return {
-    pollSource: (sourceType, opts) => pollSource(sourceType, opts, configPath),
-    pollNew,
-    isProcessed,
-    markProcessed,
-    clearState,
-    get processedCount() {
-      return Object.keys(processed).length;
+    /**
+     * Check if an item has been processed
+     */
+    isProcessed(itemId) {
+      return processedItems.has(itemId);
+    },
+    
+    /**
+     * Mark an item as processed
+     */
+    markProcessed(itemId, metadata = {}) {
+      processedItems.set(itemId, {
+        processedAt: new Date().toISOString(),
+        ...metadata,
+      });
+      saveState();
+    },
+    
+    /**
+     * Clear a specific item from processed state
+     */
+    clearProcessed(itemId) {
+      processedItems.delete(itemId);
+      saveState();
+    },
+    
+    /**
+     * Clear all processed state
+     */
+    clearState() {
+      processedItems.clear();
+      saveState();
+    },
+    
+    /**
+     * Get all processed item IDs
+     */
+    getProcessedIds() {
+      return Array.from(processedItems.keys());
     },
   };
 }

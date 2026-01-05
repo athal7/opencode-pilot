@@ -24,7 +24,7 @@ describe('Path naming consistency', () => {
     const content = readFileSync(configPath, 'utf8');
     
     test('uses opencode-pilot config path', () => {
-      assert.match(content, /opencode-pilot.*config\.json/, 
+      assert.match(content, /opencode-pilot.*config\.yaml/, 
         'config.js should reference opencode-pilot config path');
     });
     

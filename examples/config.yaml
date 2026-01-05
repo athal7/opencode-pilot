@@ -1,0 +1,74 @@
+# Example config.yaml for opencode-pilot
+#
+# Copy to ~/.config/opencode-pilot/config.yaml and customize
+# Also create templates/ directory with prompt template files
+
+# =============================================================================
+# NOTIFICATIONS - ntfy settings for mobile notifications
+# =============================================================================
+notifications:
+  topic: your-secret-topic          # Required: ntfy topic name
+  server: https://ntfy.sh           # Optional: ntfy server URL
+  idle_delay_ms: 300000             # Optional: idle notification delay (5 min)
+  idle_notify: true                 # Optional: enable idle notifications
+  error_notify: true                # Optional: enable error notifications
+  error_debounce_ms: 60000          # Optional: error debounce window (1 min)
+  debug: false                      # Optional: enable debug logging
+
+# =============================================================================
+# TOOLS - Field mappings for MCP servers (normalize different APIs)
+# =============================================================================
+tools:
+  github:
+    mappings: {}                    # GitHub already uses standard field names
+
+  linear:
+    mappings:
+      body: title                         # Use title as body
+      number: "url:/([A-Z0-9]+-[0-9]+)/"  # Extract PROJ-123 from URL
+
+# =============================================================================
+# SOURCES - What to poll (generic MCP tool references)
+# =============================================================================
+sources:
+  # GitHub issues assigned to me - work in devcontainer
+  # The devcontainer template includes /devcontainer issue-{number} to set up isolation
+  - name: my-issues
+    tool:
+      mcp: github
+      name: search_issues
+    args:
+      q: "is:issue assignee:@me state:open"
+    item:
+      id: "{html_url}"
+    prompt: devcontainer            # Template includes /devcontainer command
+    agent: plan                     # Agent to use for session
+
+  # GitHub PRs needing review
+  - name: review-requests
+    tool:
+      mcp: github
+      name: search_issues
+    args:
+      q: "is:pr review-requested:@me state:open"
+    item:
+      id: "{html_url}"
+    prompt: review
+    agent: plan
+
+  # Linear issues - work in devcontainer
+  # NOTE: Replace teamId and assigneeId with your actual Linear UUIDs
+  # Find these via: linear_list_teams and check user IDs in team members
+  - name: linear-work
+    tool:
+      mcp: linear
+      name: list_issues
+    args:
+      teamId: "your-team-uuid"      # Replace with actual team UUID
+      assigneeId: "your-user-uuid"  # Replace with actual user UUID
+      status: "Todo"
+    item:
+      id: "linear:{id}"
+    working_dir: ~/code/myproject
+    prompt: devcontainer            # Template includes /devcontainer command
+    agent: plan

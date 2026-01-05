@@ -5,11 +5,12 @@
 Before committing changes, verify documentation is updated to reflect code changes:
 
 1. **README.md** - Update if changes affect:
-   - Configuration options (config.json keys or env vars)
+   - Configuration options (config.yaml keys)
    - CLI commands (`opencode-pilot <command>`)
    - Notification types or behavior
    - Installation or setup steps
    - Service management
+   - Sources or polling behavior
 
 2. **CONTRIBUTING.md** - Update if changes affect:
    - Development setup or workflow
@@ -56,29 +57,15 @@ npx opencode-pilot start
 npx opencode-pilot status
 ```
 
-### 6. Config Migration (if needed)
+## Configuration
 
-Check release notes for breaking changes:
+Config file: `~/.config/opencode-pilot/config.yaml`
 
-```bash
-gh release view -R athal7/opencode-pilot
-```
+Configuration has three sections:
+- `notifications` - ntfy settings (topic, server, callback, etc.)
+- `repos` - per-repository settings (use YAML anchors to share config)
+- `sources` - polling sources with generic MCP tool references
 
-Config file location: `~/.config/opencode-pilot/config.json`
+Template files: `~/.config/opencode-pilot/templates/*.md`
 
-If new config options were added or format changed, update the config file. Current config keys:
-- `topic` (required) - ntfy topic name
-- `server` (default: `https://ntfy.sh`) - ntfy server URL
-- `token` - ntfy access token for protected topics
-- `callbackHost` - hostname for interactive notifications
-- `callbackPort` (default: `4097`) - callback server port
-- `idleDelayMs` (default: `300000`) - idle notification delay
-- `idleNotify` (default: `true`) - enable idle notifications
-- `errorNotify` (default: `true`) - enable error notifications
-- `errorDebounceMs` (default: `60000`) - error debounce window
-- `retryNotifyFirst` (default: `true`) - notify on first retry
-- `retryNotifyAfter` (default: `3`) - notify after N retries
-- `debug` (default: `false`) - enable debug logging to file
-- `debugPath` - custom path for debug log file (default: `~/.config/opencode-pilot/debug.log`)
-
-Environment variables override config file values with `NTFY_` prefix (e.g., `NTFY_TOPIC`).
+See [examples/config.yaml](examples/config.yaml) for a complete example.
