@@ -1,12 +1,14 @@
 /**
- * Tests for poll-service.js
+ * Tests for poll-service.js - Polling orchestration
  */
 
-import { test, describe, beforeEach, afterEach, mock } from 'node:test';
+import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { resolveAssignee, hasToolConfig, buildActionConfigFromSource } from "../../service/poll-service.js";
+import { loadRepoConfig, clearConfigCache, getAllSources } from "../../service/repo-config.js";
 
 describe('poll-service.js', () => {
   let tempDir;
@@ -15,10 +17,12 @@ describe('poll-service.js', () => {
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'opencode-pilot-poll-service-test-'));
     configPath = join(tempDir, 'config.yaml');
+    clearConfigCache();
   });
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
+    clearConfigCache();
   });
 
   describe('source configuration', () => {
@@ -36,7 +40,6 @@ sources:
 `;
       writeFileSync(configPath, config);
 
-      const { loadRepoConfig, getAllSources } = await import('../../service/repo-config.js');
       loadRepoConfig(configPath);
       const sources = getAllSources();
       
@@ -48,8 +51,6 @@ sources:
     });
 
     test('hasToolConfig validates source configuration', async () => {
-      const { hasToolConfig } = await import('../../service/poll-service.js');
-      
       // Valid config
       const valid = {
         name: 'test',
@@ -74,8 +75,6 @@ sources:
 
   describe('buildActionConfigFromSource', () => {
     test('includes source-level agent, model, prompt, and working_dir', async () => {
-      const { buildActionConfigFromSource } = await import('../../service/poll-service.js');
-      
       const source = {
         name: 'test-source',
         agent: 'plan',
@@ -99,8 +98,6 @@ sources:
     });
 
     test('falls back to repoConfig when source fields missing', async () => {
-      const { buildActionConfigFromSource } = await import('../../service/poll-service.js');
-      
       const source = {
         name: 'test-source'
         // No agent, model, prompt, working_dir
@@ -119,8 +116,6 @@ sources:
     });
 
     test('source fields override repoConfig fields', async () => {
-      const { buildActionConfigFromSource } = await import('../../service/poll-service.js');
-      
       const source = {
         name: 'test-source',
         prompt: 'review',
@@ -137,6 +132,72 @@ sources:
       assert.strictEqual(config.prompt, 'review');
       assert.strictEqual(config.agent, 'code');
     });
+  });
 
+  describe("resolveAssignee", () => {
+    test("returns assignee unchanged when not @bot", () => {
+      const result = resolveAssignee("@me", "myorg/backend");
+      assert.strictEqual(result, "@me");
+    });
+
+    test("returns specific username unchanged", () => {
+      const result = resolveAssignee("someuser", "myorg/backend");
+      assert.strictEqual(result, "someuser");
+    });
+
+    test("resolves @bot to github_app_slug[bot]", () => {
+      loadRepoConfig({
+        identity: {
+          bot: {
+            github_app_id: "123",
+            github_app_installation_id: "456",
+            github_app_private_key: "key",
+            github_app_slug: "my-pilot-app",
+          },
+          policy: {
+            autonomous: "bot",
+          },
+        },
+        repos: {
+          "myorg/backend": {},
+        },
+      });
+
+      const result = resolveAssignee("@bot", "myorg/backend");
+      assert.strictEqual(result, "my-pilot-app[bot]");
+    });
+
+    test("returns @bot unchanged when no github_app_slug configured", () => {
+      loadRepoConfig({
+        identity: {
+          bot: {
+            github_app_id: "123",
+            github_app_installation_id: "456",
+            github_app_private_key: "key",
+            // No github_app_slug
+          },
+          policy: {
+            autonomous: "bot",
+          },
+        },
+        repos: {
+          "myorg/backend": {},
+        },
+      });
+
+      const result = resolveAssignee("@bot", "myorg/backend");
+      assert.strictEqual(result, "@bot"); // Falls back unchanged
+    });
+
+    test("returns @bot unchanged when no identity configured", () => {
+      loadRepoConfig({
+        repos: {
+          "myorg/backend": {},
+        },
+      });
+
+      const result = resolveAssignee("@bot", "myorg/backend");
+      assert.strictEqual(result, "@bot"); // Falls back unchanged
+    });
   });
 });

@@ -9,13 +9,37 @@
  * 5. Track processed items to avoid duplicates
  */
 
-import { loadRepoConfig, getRepoConfig, getAllSources, getToolMappings } from "./repo-config.js";
+import { loadRepoConfig, getRepoConfig, getAllSources, getToolMappings, resolveIdentity } from "./repo-config.js";
 import { createPoller, pollGenericSource } from "./poller.js";
 import { evaluateReadiness, sortByPriority } from "./readiness.js";
 import { executeAction, buildCommand } from "./actions.js";
 import { debug } from "./logger.js";
 import path from "path";
 import os from "os";
+
+/**
+ * Resolve @bot assignee to the GitHub App username
+ * @param {string} assignee - Assignee value (may be "@bot", "@me", or a username)
+ * @param {string} repoKey - Repository key for identity lookup
+ * @returns {string} Resolved assignee value
+ */
+export function resolveAssignee(assignee, repoKey) {
+  if (assignee !== "@bot") {
+    return assignee;
+  }
+
+  // Get bot identity config
+  const identity = resolveIdentity(repoKey, "autonomous");
+  if (!identity || !identity.github_app_slug) {
+    console.warn(
+      `[poll] @bot assignee used but no github_app_slug configured for ${repoKey}`
+    );
+    return assignee; // Return unchanged, will likely fail the search
+  }
+
+  // GitHub App bot usernames are formatted as: app-slug[bot]
+  return `${identity.github_app_slug}[bot]`;
+}
 
 // Default configuration
 const DEFAULT_POLL_INTERVAL = 5 * 60 * 1000; // 5 minutes
@@ -140,6 +164,7 @@ export async function pollOnce(options = {}) {
       debug(`Executing action for ${item.id}`);
       // Build action config from source (includes agent, model, prompt, working_dir)
       const actionConfig = buildActionConfigFromSource(source, repoConfig);
+      actionConfig.repo_key = repoKey;
 
       // Execute or dry-run
       if (dryRun) {
@@ -152,7 +177,7 @@ export async function pollOnce(options = {}) {
         console.log(`[poll] Would execute: ${command}`);
       } else {
         try {
-          const result = await executeAction(item, actionConfig);
+          const result = await executeAction(item, actionConfig, { sessionType: "autonomous" });
           results.push({
             item,
             ...result,

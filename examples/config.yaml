@@ -4,6 +4,28 @@
 # Also create templates/ directory with prompt template files
 
 # =============================================================================
+# IDENTITY - Bot identity for autonomous actions
+# =============================================================================
+# When polling triggers automated sessions, you can configure a GitHub App identity
+# so actions are attributed to a bot account instead of your personal GitHub identity.
+#
+# To set up:
+# 1. Create a GitHub App in your account settings
+# 2. Set permissions: Contents (R/W), Issues (R/W), Pull requests (R/W)
+# 3. Generate and download a private key
+# 4. Install the app on your repos
+#
+# identity:
+#   bot:
+#     github_app_id: "${GITHUB_APP_ID}"                    # From env var
+#     github_app_installation_id: "${GITHUB_APP_INSTALLATION_ID}"
+#     github_app_private_key_path: "~/.config/opencode-pilot/app.pem"
+#     github_app_slug: "my-pilot-app"                      # Your app's slug
+#   policy:
+#     autonomous: bot      # Polling-initiated sessions use bot identity
+#     interactive: user    # User-initiated sessions use your identity
+
+# =============================================================================
 # NOTIFICATIONS - ntfy settings for mobile notifications
 # =============================================================================
 notifications:

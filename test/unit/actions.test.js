@@ -1,5 +1,5 @@
 /**
- * Tests for actions.js - session creation with new config format
+ * Tests for actions.js - session creation with new config format and identity injection
  */
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
@@ -7,6 +7,9 @@ import assert from 'node:assert';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
+import { buildEnvForAction } from "../../service/actions.js";
+import { loadRepoConfig, clearConfigCache } from "../../service/repo-config.js";
+import { clearTokenCache } from "../../service/github-app.js";
 
 describe('actions.js', () => {
   let tempDir;
@@ -16,10 +19,14 @@ describe('actions.js', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'opencode-pilot-actions-test-'));
     templatesDir = join(tempDir, 'templates');
     mkdirSync(templatesDir);
+    clearConfigCache();
+    clearTokenCache();
   });
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
+    clearConfigCache();
+    clearTokenCache();
   });
 
   describe('expandTemplate', () => {
@@ -230,6 +237,120 @@ describe('actions.js', () => {
       const lastArg = cmdInfo.args[cmdInfo.args.length - 1];
       assert.ok(lastArg.includes('/devcontainer issue-66'), 'Prompt should include /devcontainer command');
       assert.ok(lastArg.includes('Fix bug'), 'Prompt should include title');
+    });
+  });
+
+  describe("buildEnvForAction", () => {
+    test("sets OPENCODE_SESSION_TYPE for autonomous sessions", async () => {
+      loadRepoConfig({
+        repos: {
+          "myorg/backend": {},
+        },
+      });
+
+      const env = await buildEnvForAction("myorg/backend", "autonomous");
+      assert.strictEqual(env.OPENCODE_SESSION_TYPE, "autonomous");
+    });
+
+    test("sets OPENCODE_SESSION_TYPE for interactive sessions", async () => {
+      loadRepoConfig({
+        repos: {
+          "myorg/backend": {},
+        },
+      });
+
+      const env = await buildEnvForAction("myorg/backend", "interactive");
+      assert.strictEqual(env.OPENCODE_SESSION_TYPE, "interactive");
+    });
+
+    test("does not inject identity for interactive sessions with bot policy", async () => {
+      loadRepoConfig({
+        identity: {
+          bot: {
+            github_app_id: "123",
+            github_app_installation_id: "456",
+            github_app_private_key: "key",
+          },
+          policy: {
+            autonomous: "bot",
+            interactive: "user",
+          },
+        },
+        repos: {
+          "myorg/backend": {},
+        },
+      });
+
+      const env = await buildEnvForAction("myorg/backend", "interactive");
+
+      // Should NOT have bot identity (user policy for interactive)
+      assert.strictEqual(env.GH_TOKEN, undefined);
+      assert.strictEqual(env.GIT_AUTHOR_NAME, undefined);
+      assert.strictEqual(env.OPENCODE_SESSION_TYPE, "interactive");
+    });
+
+    test("does not inject identity when no config", async () => {
+      loadRepoConfig({
+        repos: {
+          "myorg/backend": {},
+        },
+      });
+
+      const env = await buildEnvForAction("myorg/backend", "autonomous");
+
+      assert.strictEqual(env.GH_TOKEN, undefined);
+      assert.strictEqual(env.GIT_AUTHOR_NAME, undefined);
+      assert.strictEqual(env.OPENCODE_SESSION_TYPE, "autonomous");
+    });
+
+    test("does not inject identity when bot config incomplete", async () => {
+      loadRepoConfig({
+        identity: {
+          bot: {
+            // Missing required GitHub App fields
+            github_app_id: "123",
+          },
+          policy: {
+            autonomous: "bot",
+          },
+        },
+        repos: {
+          "myorg/backend": {},
+        },
+      });
+
+      const env = await buildEnvForAction("myorg/backend", "autonomous");
+
+      // Incomplete GitHub App config should not inject identity
+      assert.strictEqual(env.GH_TOKEN, undefined);
+      assert.strictEqual(env.GIT_AUTHOR_NAME, undefined);
+    });
+
+    test("handles token fetch errors gracefully (falls back to no identity)", async () => {
+      loadRepoConfig({
+        identity: {
+          bot: {
+            github_app_id: "123",
+            github_app_installation_id: "456",
+            // Invalid key will cause token fetch to fail
+            github_app_private_key_path: "/nonexistent/path/to/key.pem",
+          },
+          policy: {
+            autonomous: "bot",
+          },
+        },
+        repos: {
+          "myorg/backend": {},
+        },
+      });
+
+      // Should not throw - should fall back to no identity
+      const env = await buildEnvForAction("myorg/backend", "autonomous");
+
+      // Falls back to no identity on error
+      assert.strictEqual(env.GH_TOKEN, undefined);
+      assert.strictEqual(env.GIT_AUTHOR_NAME, undefined);
+      assert.strictEqual(env.OPENCODE_SESSION_TYPE, "autonomous");
     });
   });
 });

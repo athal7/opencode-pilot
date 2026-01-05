@@ -42,6 +42,28 @@ function expandTemplate(template, item) {
 }
 
 /**
+ * Expand ${ENV_VAR} patterns in strings with environment variable values
+ * @param {any} obj - Value to expand (string, array, or object)
+ * @returns {any} Value with env vars expanded
+ */
+function expandEnvVars(obj) {
+  if (typeof obj === "string") {
+    return obj.replace(/\$\{(\w+)\}/g, (_, name) => process.env[name] || "");
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => expandEnvVars(item));
+  }
+  if (typeof obj === "object" && obj !== null) {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = expandEnvVars(value);
+    }
+    return result;
+  }
+  return obj;
+}
+
+/**
  * Load configuration from YAML file or object
  * @param {string|object} [configOrPath] - Path to YAML file or config object
  */
@@ -219,4 +241,75 @@ export function findRepoByPath(searchPath) {
  */
 export function clearConfigCache() {
   configCache = null;
+}
+
+/**
+ * Get top-level identity configuration
+ * @returns {object} Identity configuration or empty object
+ */
+export function getIdentityConfig() {
+  const config = getRawConfig();
+  return config.identity || {};
+}
+
+/**
+ * Resolve identity configuration for a repo and session type
+ *
+ * Returns the identity to use based on the policy configuration.
+ * - If policy is 'user' or not configured, returns null (use ambient environment)
+ * - If policy is 'bot', returns the bot identity with env vars expanded
+ *
+ * Identity is configured at the top-level `identity:` section.
+ * Per-repo overrides can be set in `repos.<repoKey>.identity`.
+ *
+ * For GitHub App authentication, returns the raw app config fields
+ * (github_app_id, github_app_installation_id, etc.) for the caller to
+ * generate tokens as needed.
+ *
+ * @param {string} repoKey - Repository identifier (e.g., "myorg/backend")
+ * @param {string} sessionType - Session type: 'autonomous' or 'interactive'
+ * @returns {object|null} Identity object or null
+ */
+export function resolveIdentity(repoKey, sessionType) {
+  const globalIdentity = getIdentityConfig();
+  const repoConfig = getRepoConfig(repoKey);
+  const repoIdentity = repoConfig.identity || {};
+
+  // Get policy: repo-level overrides global
+  const policy = repoIdentity.policy?.[sessionType] ?? globalIdentity.policy?.[sessionType];
+
+  // If no policy or policy is 'user', return null (use ambient environment)
+  if (!policy || policy === "user") {
+    return null;
+  }
+
+  // If policy is 'bot', return the bot identity (GitHub App config)
+  if (policy === "bot") {
+    // Prefer repo-level bot config, fall back to global
+    const bot = repoIdentity.bot || globalIdentity.bot;
+    if (!bot) {
+      console.warn(
+        `[repo-config] Policy '${sessionType}: bot' configured for ${repoKey} but no bot identity defined`
+      );
+      return null;
+    }
+
+    // Expand env vars at resolution time (not at config load time)
+    const expanded = expandEnvVars(bot);
+
+    // Return GitHub App fields
+    return {
+      github_app_id: expanded.github_app_id || "",
+      github_app_installation_id: expanded.github_app_installation_id || "",
+      github_app_private_key: expanded.github_app_private_key || "",
+      github_app_private_key_path: expanded.github_app_private_key_path || "",
+      github_app_slug: expanded.github_app_slug || "",
+    };
+  }
+
+  // Unknown policy value
+  console.warn(
+    `[repo-config] Unknown identity policy '${policy}' for ${repoKey}:${sessionType}`
+  );
+  return null;
 }
