@@ -170,7 +170,8 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
       if (event.type === 'session.status') {
         const status = event.properties?.status?.type
         // Extract conversation ID from event for per-conversation tracking (Issue #34)
-        const conversationId = event.properties?.info?.id
+        // OpenCode uses sessionID (capital ID)
+        const conversationId = event.properties?.sessionID || event.properties?.info?.id
         debug(`Event: session.status, status=${status}, sessionId=${conversationId || 'unknown'}`)
         
         // Verify session belongs to our OpenCode instance (Issue #50)
