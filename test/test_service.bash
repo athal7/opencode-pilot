@@ -101,8 +101,8 @@ test_service_handles_nonce_creation() {
 }
 
 test_service_logs_with_prefix() {
-  grep -q "\[opencode-ntfy\]" "$SERVICE_DIR/server.js" || {
-    echo "Logging prefix [opencode-ntfy] not found in server.js"
+  grep -q "\[opencode-pilot\]" "$SERVICE_DIR/server.js" || {
+    echo "Logging prefix [opencode-pilot] not found in server.js"
     return 1
   }
 }
@@ -126,7 +126,7 @@ test_service_starts_and_stops() {
     // Use random ports/sockets to avoid conflicts
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -161,7 +161,7 @@ test_service_health_endpoint_returns_200() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -199,7 +199,7 @@ test_service_returns_401_for_invalid_nonce() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -257,7 +257,7 @@ test_service_mobile_page_returns_html() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -307,7 +307,7 @@ test_service_mobile_page_has_text_input() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -354,7 +354,7 @@ test_service_api_session_proxies_get() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -395,7 +395,7 @@ test_service_api_chat_proxies_post() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -439,7 +439,7 @@ test_service_api_agent_proxies_get() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -480,7 +480,7 @@ test_service_api_provider_proxies_get() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -521,7 +521,7 @@ test_service_mobile_ui_fetches_messages_endpoint() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -569,7 +569,7 @@ test_service_mobile_ui_parses_message_info_role() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -610,7 +610,7 @@ test_service_mobile_ui_fetches_session_title() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -654,7 +654,7 @@ test_service_mobile_ui_shows_conversation_history() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -698,7 +698,7 @@ test_service_mobile_page_has_agent_selector() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -747,7 +747,7 @@ test_service_mobile_page_has_model_selector() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -796,7 +796,7 @@ test_service_mobile_page_sends_agent_with_message() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -840,7 +840,7 @@ test_service_mobile_page_sends_model_with_message() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -888,7 +888,7 @@ test_service_rejects_privileged_ports() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -928,7 +928,7 @@ test_service_rejects_low_ports() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -967,7 +967,7 @@ test_service_escapes_html_in_reponame() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -1015,7 +1015,7 @@ test_service_markdown_renderer_escapes_xss() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -1078,7 +1078,7 @@ test_service_handles_cors_preflight() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -1125,7 +1125,7 @@ test_service_mobile_ui_uses_dynamic_viewport_units() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -1175,7 +1175,7 @@ test_service_mobile_ui_has_viewport_resize_handler() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
@@ -1218,7 +1218,7 @@ test_service_rejects_large_request_body() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-ntfy-test-' + process.pid + '.sock'
+      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
     };
     
     const service = await startService(config);
