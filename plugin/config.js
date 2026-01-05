@@ -1,7 +1,7 @@
-// Configuration management for opencode-ntfy
-// Reads from ~/.config/opencode-ntfy/config.json, with env var overrides
+// Configuration management for opencode-pilot
+// Reads from ~/.config/opencode-pilot/config.json, with env var overrides
 //
-// Example config file (~/.config/opencode-ntfy/config.json):
+// Example config file (~/.config/opencode-pilot/config.json):
 // {
 //   "topic": "my-secret-topic",
 //   "server": "https://ntfy.sh",
@@ -17,7 +17,7 @@ import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-const CONFIG_PATH = join(homedir(), '.config', 'opencode-ntfy', 'config.json')
+const CONFIG_PATH = join(homedir(), '.config', 'opencode-pilot', 'config.json')
 
 /**
  * Load configuration from config file and environment
