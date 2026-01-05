@@ -6,6 +6,7 @@
  */
 
 import { spawn } from "child_process";
+import { debug } from "./logger.js";
 import path from "path";
 import os from "os";
 
@@ -165,6 +166,9 @@ export async function executeAction(item, config, options = {}) {
   const cmdInfo = getCommandInfo(item, config);
   const command = buildCommand(item, config); // For logging/display
 
+  debug(`executeAction: command=${command}`);
+  debug(`executeAction: args=${JSON.stringify(cmdInfo.args)}, cwd=${cmdInfo.cwd}`);
+
   if (options.dryRun) {
     return {
       command,
@@ -172,11 +176,22 @@ export async function executeAction(item, config, options = {}) {
     };
   }
 
-  // Execute opencode run
-  const result = await runSpawn(cmdInfo.args, { cwd: cmdInfo.cwd });
+  // Execute opencode run in background (detached)
+  // We don't wait for completion since sessions can run for a long time
+  debug(`executeAction: spawning opencode run (detached)`);
+  const [cmd, ...cmdArgs] = cmdInfo.args;
+  const child = spawn(cmd, cmdArgs, {
+    cwd: cmdInfo.cwd,
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+  
+  debug(`executeAction: spawned pid=${child.pid}`);
   return {
     command,
-    ...result,
+    success: true,
+    pid: child.pid,
   };
 }
 
