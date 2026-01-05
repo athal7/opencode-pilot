@@ -33,7 +33,10 @@ jobs:
             node --check "$file"
           done
 
-      - name: Run tests
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run integration tests
         run: ./test/run_tests.bash
 
   release:

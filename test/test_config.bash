@@ -62,10 +62,16 @@ test_config_reads_file() {
 }
 
 test_config_uses_separate_config_file() {
-  grep -q "opencode-ntfy.*config.json\|CONFIG_PATH" "$PLUGIN_DIR/config.js" || {
-    echo "Separate config file path not found in config.js"
+  # Must use opencode-pilot (not opencode-ntfy) config path
+  grep -q "opencode-pilot.*config.json" "$PLUGIN_DIR/config.js" || {
+    echo "Expected config path ~/.config/opencode-pilot/config.json not found in config.js"
     return 1
   }
+  # Ensure old path is NOT present
+  if grep -q "opencode-ntfy" "$PLUGIN_DIR/config.js"; then
+    echo "ERROR: Old opencode-ntfy path still present in config.js"
+    return 1
+  fi
 }
 
 test_config_parses_json() {
