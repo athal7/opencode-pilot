@@ -106,12 +106,12 @@ test_repo_config_defaults() {
     // Get config for non-existent repo should return defaults
     const config = getRepoConfig('nonexistent/repo');
     
-    if (!config.wip_limits) {
-      console.log('FAIL: Missing wip_limits in defaults');
+    if (!config.readiness) {
+      console.log('FAIL: Missing readiness in defaults');
       process.exit(1);
     }
-    if (config.wip_limits.max_concurrent !== 1) {
-      console.log('FAIL: Expected default max_concurrent=1, got ' + config.wip_limits.max_concurrent);
+    if (!config.readiness.labels) {
+      console.log('FAIL: Missing readiness.labels in defaults');
       process.exit(1);
     }
     console.log('PASS');
@@ -141,10 +141,10 @@ test_repo_config_prefix_matching() {
       repos: {
         'myorg/': {
           repo_path: '~/code/{repo}',
-          wip_limits: { max_concurrent: 5 }
+          readiness: { labels: { any_of: ['ready'] } }
         },
         'myorg/backend': {
-          wip_limits: { max_concurrent: 2 }
+          readiness: { labels: { any_of: ['backend-ready'] } }
         }
       }
     };
@@ -154,16 +154,16 @@ test_repo_config_prefix_matching() {
     // Get config for myorg/backend - should merge prefix + exact
     const config = getRepoConfig('myorg/backend');
     
-    // Should have wip_limits from exact match (2, not 5)
-    if (config.wip_limits.max_concurrent !== 2) {
-      console.log('FAIL: Expected max_concurrent=2 from exact match, got ' + config.wip_limits.max_concurrent);
+    // Should have readiness from exact match
+    if (!config.readiness.labels.any_of.includes('backend-ready')) {
+      console.log('FAIL: Expected any_of to include backend-ready from exact match');
       process.exit(1);
     }
     
     // Get config for myorg/frontend - should get prefix config
     const frontendConfig = getRepoConfig('myorg/frontend');
-    if (frontendConfig.wip_limits.max_concurrent !== 5) {
-      console.log('FAIL: Expected max_concurrent=5 from prefix, got ' + frontendConfig.wip_limits.max_concurrent);
+    if (!frontendConfig.readiness.labels.any_of.includes('ready')) {
+      console.log('FAIL: Expected any_of to include ready from prefix');
       process.exit(1);
     }
     

@@ -5,20 +5,11 @@
 # Configuration uses prefix matching - "myorg/" matches all "myorg/*" repos.
 # More specific paths override less specific ones (deep merge).
 
-# Global settings (apply to all repos)
-global:
-  wip_limits:
-    max_concurrent: 10  # Maximum total concurrent sessions across all repos
-
 repos:
   # Organization-wide defaults (prefix match)
   myorg/:
     # Path to local repo clone - {repo} expands to full repo name
     repo_path: ~/code/{repo}
-
-    # WIP limits control concurrent sessions
-    wip_limits:
-      max_concurrent: 3
 
     # Session configuration
     session:
@@ -35,7 +26,7 @@ repos:
 
         # At least one of these labels must be present
         any_of:
-          - "ocdc:ready"
+          - "pilot:ready"
           - "ready-for-dev"
 
       # How to calculate priority (higher = picked first)
@@ -72,7 +63,7 @@ repos:
         fetch:
           assignee: "@me"
           labels:
-            - "ocdc:ready"
+            - "pilot:ready"
           state: open
 
       # Poll GitHub PRs that need review
@@ -103,8 +94,6 @@ repos:
   # Personal projects with simpler config
   personal/:
     repo_path: ~/projects/{repo}
-    wip_limits:
-      max_concurrent: 1
     sources:
       - type: github_issue
         fetch:

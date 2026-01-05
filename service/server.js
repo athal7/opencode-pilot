@@ -1,4 +1,4 @@
-// Standalone callback server for opencode-ntfy
+// Standalone callback server for opencode-pilot
 // Implements Issue #13: Separate callback server as brew service
 //
 // This service runs persistently via brew services and handles:
@@ -6,6 +6,7 @@
 // - Unix socket IPC for plugin communication
 // - Nonce management for permission requests
 // - Session registration and response forwarding
+// - Polling for tracker items (GitHub issues, Linear issues)
 
 import { createServer as createHttpServer } from 'http'
 import { createServer as createNetServer } from 'net'
@@ -13,12 +14,14 @@ import { randomUUID } from 'crypto'
 import { existsSync, unlinkSync, realpathSync, readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { homedir } from 'os'
-import { join } from 'path'
+import { join, dirname } from 'path'
 
 // Default configuration
 const DEFAULT_HTTP_PORT = 4097
-const DEFAULT_SOCKET_PATH = '/tmp/opencode-ntfy.sock'
-const CONFIG_PATH = join(homedir(), '.config', 'opencode-ntfy', 'config.json')
+const DEFAULT_SOCKET_PATH = '/tmp/opencode-pilot.sock'
+const CONFIG_PATH = join(homedir(), '.config', 'opencode-pilot', 'config.json')
+const DEFAULT_REPOS_CONFIG = join(homedir(), '.config', 'opencode-pilot', 'repos.yaml')
+const DEFAULT_POLL_INTERVAL = 5 * 60 * 1000 // 5 minutes
 
 /**
  * Load callback config from environment variables and config file
@@ -85,7 +88,7 @@ function htmlResponse(title, message, success) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${title} - opencode-ntfy</title>
+  <title>${title} - opencode-pilot</title>
   <style>
     body { font-family: -apple-system, system-ui, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #1a1a1a; color: #fff; }
     .container { text-align: center; padding: 2rem; }
@@ -996,11 +999,11 @@ function cleanupNonces() {
  * @param {net.Socket} socket - Socket connection to the plugin
  */
 function registerSession(sessionId, socket) {
-  console.log(`[opencode-ntfy] Session registered: ${sessionId}`)
+  console.log(`[opencode-pilot] Session registered: ${sessionId}`)
   sessions.set(sessionId, socket)
   
   socket.on('close', () => {
-    console.log(`[opencode-ntfy] Session disconnected: ${sessionId}`)
+    console.log(`[opencode-pilot] Session disconnected: ${sessionId}`)
     sessions.delete(sessionId)
   })
 }
@@ -1015,7 +1018,7 @@ function registerSession(sessionId, socket) {
 function sendToSession(sessionId, permissionId, response) {
   const socket = sessions.get(sessionId)
   if (!socket) {
-    console.warn(`[opencode-ntfy] Session not found: ${sessionId}`)
+    console.warn(`[opencode-pilot] Session not found: ${sessionId}`)
     return false
   }
   
@@ -1028,7 +1031,7 @@ function sendToSession(sessionId, permissionId, response) {
     socket.write(message + '\n')
     return true
   } catch (error) {
-    console.error(`[opencode-ntfy] Failed to send to session ${sessionId}: ${error.message}`)
+    console.error(`[opencode-pilot] Failed to send to session ${sessionId}: ${error.message}`)
     return false
   }
 }
@@ -1089,7 +1092,7 @@ async function proxyToOpenCode(req, res, targetPort, targetPath) {
     })
     res.end(responseBody)
   } catch (error) {
-    console.error(`[opencode-ntfy] Proxy error: ${error.message}`)
+    console.error(`[opencode-pilot] Proxy error: ${error.message}`)
     res.writeHead(502, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Failed to connect to OpenCode server' }))
   }
@@ -1278,7 +1281,7 @@ function createCallbackServer(port) {
   })
   
   server.on('error', (err) => {
-    console.error(`[opencode-ntfy] HTTP server error: ${err.message}`)
+    console.error(`[opencode-pilot] HTTP server error: ${err.message}`)
   })
   
   return server
@@ -1291,7 +1294,7 @@ function createCallbackServer(port) {
  */
 function createSocketServer(socketPath) {
   const server = createNetServer((socket) => {
-    console.log('[opencode-ntfy] Plugin connected')
+    console.log('[opencode-pilot] Plugin connected')
     
     let buffer = ''
     
@@ -1310,18 +1313,18 @@ function createSocketServer(socketPath) {
           const message = JSON.parse(line)
           handleSocketMessage(socket, message)
         } catch (error) {
-          console.warn(`[opencode-ntfy] Invalid message: ${error.message}`)
+          console.warn(`[opencode-pilot] Invalid message: ${error.message}`)
         }
       }
     })
     
     socket.on('error', (err) => {
-      console.warn(`[opencode-ntfy] Socket error: ${err.message}`)
+      console.warn(`[opencode-pilot] Socket error: ${err.message}`)
     })
   })
   
   server.on('error', (err) => {
-    console.error(`[opencode-ntfy] Socket server error: ${err.message}`)
+    console.error(`[opencode-pilot] Socket server error: ${err.message}`)
   })
   
   return server
@@ -1349,7 +1352,7 @@ function handleSocketMessage(socket, message) {
       break
       
     default:
-      console.warn(`[opencode-ntfy] Unknown message type: ${message.type}`)
+      console.warn(`[opencode-pilot] Unknown message type: ${message.type}`)
   }
 }
 
@@ -1357,19 +1360,25 @@ function handleSocketMessage(socket, message) {
  * Start the callback service
  * @param {Object} config - Configuration options
  * @param {number} [config.httpPort] - HTTP server port (default: 4097)
- * @param {string} [config.socketPath] - Unix socket path (default: /tmp/opencode-ntfy.sock)
- * @returns {Promise<Object>} Service instance with httpServer, socketServer, and cleanup interval
+ * @param {string} [config.socketPath] - Unix socket path (default: /tmp/opencode-pilot.sock)
+ * @param {boolean} [config.enablePolling] - Enable polling for tracker items (default: true)
+ * @param {number} [config.pollInterval] - Poll interval in ms (default: 5 minutes)
+ * @param {string} [config.reposConfig] - Path to repos.yaml config
+ * @returns {Promise<Object>} Service instance with httpServer, socketServer, polling, and cleanup interval
  */
 export async function startService(config = {}) {
   const httpPort = config.httpPort ?? DEFAULT_HTTP_PORT
   const socketPath = config.socketPath ?? DEFAULT_SOCKET_PATH
+  const enablePolling = config.enablePolling !== false
+  const pollInterval = config.pollInterval ?? DEFAULT_POLL_INTERVAL
+  const reposConfig = config.reposConfig ?? DEFAULT_REPOS_CONFIG
   
   // Clean up stale socket file
   if (existsSync(socketPath)) {
     try {
       unlinkSync(socketPath)
     } catch (err) {
-      console.warn(`[opencode-ntfy] Could not remove stale socket: ${err.message}`)
+      console.warn(`[opencode-pilot] Could not remove stale socket: ${err.message}`)
     }
   }
   
@@ -1381,7 +1390,7 @@ export async function startService(config = {}) {
   await new Promise((resolve, reject) => {
     httpServer.listen(httpPort, () => {
       const actualPort = httpServer.address().port
-      console.log(`[opencode-ntfy] HTTP server listening on port ${actualPort}`)
+      console.log(`[opencode-pilot] HTTP server listening on port ${actualPort}`)
       resolve()
     })
     httpServer.once('error', reject)
@@ -1390,7 +1399,7 @@ export async function startService(config = {}) {
   // Start socket server
   await new Promise((resolve, reject) => {
     socketServer.listen(socketPath, () => {
-      console.log(`[opencode-ntfy] Socket server listening at ${socketPath}`)
+      console.log(`[opencode-pilot] Socket server listening at ${socketPath}`)
       resolve()
     })
     socketServer.once('error', reject)
@@ -1400,15 +1409,34 @@ export async function startService(config = {}) {
   const cleanupInterval = setInterval(() => {
     const removed = cleanupNonces()
     if (removed > 0) {
-      console.log(`[opencode-ntfy] Cleaned up ${removed} expired nonces`)
+      console.log(`[opencode-pilot] Cleaned up ${removed} expired nonces`)
     }
   }, 60 * 1000) // Every minute
+  
+  // Start polling for tracker items if config exists
+  let pollingState = null
+  if (enablePolling && existsSync(reposConfig)) {
+    try {
+      // Dynamic import to avoid circular dependencies
+      const { startPolling } = await import('./poll-service.js')
+      pollingState = startPolling({
+        configPath: reposConfig,
+        interval: pollInterval,
+      })
+      console.log(`[opencode-pilot] Polling enabled with config: ${reposConfig}`)
+    } catch (err) {
+      console.warn(`[opencode-pilot] Could not start polling: ${err.message}`)
+    }
+  } else if (enablePolling) {
+    console.log(`[opencode-pilot] Polling disabled (no repos.yaml at ${reposConfig})`)
+  }
   
   return {
     httpServer,
     socketServer,
     cleanupInterval,
     socketPath,
+    pollingState,
   }
 }
 
@@ -1419,6 +1447,11 @@ export async function startService(config = {}) {
 export async function stopService(service) {
   if (service.cleanupInterval) {
     clearInterval(service.cleanupInterval)
+  }
+  
+  // Stop polling if active
+  if (service.pollingState) {
+    service.pollingState.stop()
   }
   
   // Close all active session connections first
@@ -1449,7 +1482,7 @@ export async function stopService(service) {
     }
   }
   
-  console.log('[opencode-ntfy] Service stopped')
+  console.log('[opencode-pilot] Service stopped')
 }
 
 // If run directly, start the service
@@ -1471,19 +1504,19 @@ if (isMainModule()) {
     socketPath: process.env.NTFY_SOCKET_PATH || DEFAULT_SOCKET_PATH,
   }
   
-  console.log('[opencode-ntfy] Starting callback service...')
+  console.log('[opencode-pilot] Starting callback service...')
   
   const service = await startService(config)
   
   // Handle graceful shutdown
   process.on('SIGTERM', async () => {
-    console.log('[opencode-ntfy] Received SIGTERM, shutting down...')
+    console.log('[opencode-pilot] Received SIGTERM, shutting down...')
     await stopService(service)
     process.exit(0)
   })
   
   process.on('SIGINT', async () => {
-    console.log('[opencode-ntfy] Received SIGINT, shutting down...')
+    console.log('[opencode-pilot] Received SIGINT, shutting down...')
     await stopService(service)
     process.exit(0)
   })

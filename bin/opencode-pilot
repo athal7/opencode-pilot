@@ -5,7 +5,6 @@
  * Commands:
  *   setup       Copy plugin files and configure OpenCode
  *   status      Show installation and service status
- *   poll        Start polling for issues/PRs to work on
  *   help        Show help
  */
 
@@ -26,7 +25,7 @@ function findServiceDir() {
     join(__dirname, "..", "libexec"),      // Homebrew: bin/../libexec
   ];
   for (const dir of candidates) {
-    if (existsSync(join(dir, "poll-service.js"))) {
+    if (existsSync(join(dir, "server.js"))) {
       return dir;
     }
   }
@@ -56,7 +55,6 @@ const PLUGIN_DEST = join(OPENCODE_CONFIG_DIR, "plugins", PLUGIN_NAME);
 const OPENCODE_CONFIG_FILE = join(OPENCODE_CONFIG_DIR, "opencode.json");
 const PILOT_CONFIG_FILE = join(os.homedir(), ".config/opencode-pilot/config.json");
 const DEFAULT_REPOS_CONFIG = join(os.homedir(), ".config/opencode-pilot/repos.yaml");
-const DEFAULT_STATE_PATH = join(os.homedir(), ".cache/opencode-pilot/poll-state.json");
 
 // Parse command line arguments
 function parseArgs(args) {
@@ -109,16 +107,15 @@ Usage:
 Commands:
   setup         Copy plugin files and configure OpenCode
   status        Show installation and service status
-  poll          Start polling for issues/PRs to work on
   help          Show this help message
 
-Setup copies the notification plugin to OpenCode and configures it.
-Poll monitors GitHub/Linear for issues to work on automatically.
+The service (brew services start opencode-pilot) handles:
+- Notification callbacks from ntfy
+- Polling for GitHub/Linear issues to work on
 
 Examples:
   opencode-pilot setup               # Initial setup
   opencode-pilot status              # Check status
-  opencode-pilot poll --dry-run      # Preview polling
 `);
 }
 
@@ -286,126 +283,10 @@ function statusCommand() {
   console.log("Polling Configuration:");
   if (existsSync(DEFAULT_REPOS_CONFIG)) {
     console.log(`  repos.yaml: ${DEFAULT_REPOS_CONFIG}`);
+    console.log("  polling: enabled (handled by service)");
   } else {
-    console.log("  repos.yaml: not found (polling disabled)");
-  }
-}
-
-// ============================================================================
-// Poll Command
-// ============================================================================
-
-function showPollHelp() {
-  console.log(`opencode-pilot poll - Poll for issues/PRs to work on
-
-Usage:
-  opencode-pilot poll [options]
-  opencode-pilot poll status
-
-Options:
-  --dry-run     Show what would be done without executing
-  --once        Run one poll cycle and exit
-  --config      Path to repos.yaml config file
-  --interval    Poll interval in seconds (default: 300)
-
-Subcommands:
-  status        Show current WIP status and active sessions
-
-Examples:
-  opencode-pilot poll                    # Start polling loop
-  opencode-pilot poll --dry-run          # Preview what would happen
-  opencode-pilot poll status             # Show active sessions
-`);
-}
-
-async function pollStatusCommand(flags) {
-  const statePath = flags.state || DEFAULT_STATE_PATH;
-
-  const { getWipStatus } = await import(join(serviceDir, "poll-service.js"));
-  const status = getWipStatus(statePath);
-
-  console.log("opencode-pilot poll status");
-  console.log("==========================");
-  console.log("");
-  console.log(`Active sessions: ${status.count} / ${status.globalLimit}`);
-  console.log("");
-
-  if (status.activeSessions.length === 0) {
-    console.log("No active sessions.");
-  } else {
-    console.log("Sessions:");
-    for (const session of status.activeSessions) {
-      console.log(`  - ${session.id} (${session.repo_key})`);
-      console.log(`    Started: ${session.started_at}`);
-    }
-  }
-}
-
-async function pollCommand(flags, subcommand) {
-  if (flags.help || flags.h) {
-    showPollHelp();
-    return;
-  }
-
-  if (subcommand === "status") {
-    await pollStatusCommand(flags);
-    return;
-  }
-
-  const configPath = flags.config || DEFAULT_REPOS_CONFIG;
-  const statePath = flags.state || DEFAULT_STATE_PATH;
-  const dryRun = flags["dry-run"] || false;
-  const once = flags.once || false;
-  const intervalSec = parseInt(flags.interval || "300", 10);
-
-  if (!existsSync(configPath)) {
-    console.error(`Config not found: ${configPath}`);
-    console.error("");
-    console.error("Create a repos.yaml config file at:");
-    console.error(`  ${DEFAULT_REPOS_CONFIG}`);
-    console.error("");
-    console.error("See: https://github.com/athal7/opencode-pilot#configuration");
-    process.exit(1);
-  }
-
-  const { pollOnce, startPolling, stopPolling } = await import(
-    join(serviceDir, "poll-service.js")
-  );
-
-  if (once || dryRun) {
-    console.log(`[poll] Running single poll cycle${dryRun ? " (dry-run)" : ""}...`);
-    console.log(`[poll] Config: ${configPath}`);
-    console.log("");
-
-    const results = await pollOnce({ dryRun, configPath, statePath });
-
-    if (results.length === 0) {
-      console.log("[poll] No actions taken.");
-    } else {
-      console.log(`[poll] ${results.length} action(s) ${dryRun ? "would be" : ""} taken.`);
-    }
-  } else {
-    console.log("[poll] Starting polling loop...");
-    console.log(`[poll] Config: ${configPath}`);
-    console.log(`[poll] Interval: ${intervalSec}s`);
-    console.log("");
-
-    startPolling({
-      configPath,
-      statePath,
-      interval: intervalSec * 1000,
-    });
-
-    process.on("SIGINT", () => {
-      console.log("\n[poll] Shutting down...");
-      stopPolling();
-      process.exit(0);
-    });
-
-    process.on("SIGTERM", () => {
-      stopPolling();
-      process.exit(0);
-    });
+    console.log(`  repos.yaml: not found at ${DEFAULT_REPOS_CONFIG}`);
+    console.log("  polling: disabled");
   }
 }
 
@@ -429,10 +310,6 @@ async function main() {
 
     case "status":
       statusCommand();
-      break;
-
-    case "poll":
-      await pollCommand(flags, subcommand);
       break;
 
     default:

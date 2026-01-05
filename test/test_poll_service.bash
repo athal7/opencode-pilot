@@ -89,9 +89,9 @@ test_poll_service_uses_actions() {
   }
 }
 
-test_poll_service_respects_wip_limits() {
-  grep -q "wip\|max_concurrent\|limit" "$SERVICE_DIR/poll-service.js" || {
-    echo "WIP limit handling not found"
+test_poll_service_tracks_processed() {
+  grep -q "isProcessed\|markProcessed" "$SERVICE_DIR/poll-service.js" || {
+    echo "Processed tracking not found"
     return 1
   }
 }
@@ -162,7 +162,7 @@ for test_func in \
   test_poll_service_uses_poller \
   test_poll_service_uses_readiness \
   test_poll_service_uses_actions \
-  test_poll_service_respects_wip_limits
+  test_poll_service_tracks_processed
 do
   run_test "${test_func#test_}" "$test_func"
 done

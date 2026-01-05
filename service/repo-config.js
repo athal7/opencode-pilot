@@ -23,11 +23,7 @@ let configCache = null;
 /**
  * Default global configuration
  */
-const DEFAULT_GLOBAL_CONFIG = {
-  wip_limits: {
-    max_concurrent: 1,
-  },
-};
+const DEFAULT_GLOBAL_CONFIG = {};
 
 /**
  * Default source configuration (applied when no sources specified)
@@ -45,9 +41,6 @@ const DEFAULT_SOURCE = {
  */
 const DEFAULT_CONFIG = {
   sources: [],
-  wip_limits: {
-    max_concurrent: 1,
-  },
   readiness: {
     labels: {
       required: [],
@@ -310,10 +303,6 @@ export function getGlobalConfig() {
   return {
     ...DEFAULT_GLOBAL_CONFIG,
     ...config.global,
-    wip_limits: {
-      ...DEFAULT_GLOBAL_CONFIG.wip_limits,
-      ...(config.global?.wip_limits || {}),
-    },
   };
 }
 
