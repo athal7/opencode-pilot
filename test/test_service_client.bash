@@ -127,6 +127,33 @@ test_service_client_handles_connection_errors() {
 }
 
 # =============================================================================
+# Debug Logging Tests
+# =============================================================================
+
+test_service_client_imports_logger() {
+  grep -q "import.*logger\|from.*logger" "$PLUGIN_DIR/service-client.js" || {
+    echo "logger import not found in service-client.js"
+    return 1
+  }
+}
+
+test_service_client_logs_connection_status() {
+  # Should log connection attempts
+  grep -q "debug.*[Cc]onnect" "$PLUGIN_DIR/service-client.js" || {
+    echo "debug logging for connection status not found in service-client.js"
+    return 1
+  }
+}
+
+test_service_client_logs_registration() {
+  # Should log session registration
+  grep -q "debug.*[Rr]egister" "$PLUGIN_DIR/service-client.js" || {
+    echo "debug logging for registration not found in service-client.js"
+    return 1
+  }
+}
+
+# =============================================================================
 # Functional Tests (requires Node.js and running service)
 # =============================================================================
 
@@ -533,6 +560,17 @@ for test_func in \
   test_service_client_handles_permission_response \
   test_service_client_no_console_output \
   test_service_client_handles_connection_errors
+do
+  run_test "${test_func#test_}" "$test_func"
+done
+
+echo ""
+echo "Debug Logging Tests:"
+
+for test_func in \
+  test_service_client_imports_logger \
+  test_service_client_logs_connection_status \
+  test_service_client_logs_registration
 do
   run_test "${test_func#test_}" "$test_func"
 done

@@ -8,7 +8,9 @@
 //   "token": "tk_xxx",
 //   "callbackHost": "myhost.ts.net",
 //   "callbackPort": 4097,
-//   "idleDelayMs": 300000
+//   "idleDelayMs": 300000,
+//   "debug": true,
+//   "debugPath": "/custom/path/debug.log"
 // }
 
 import { readFileSync, existsSync } from 'fs'
@@ -74,6 +76,8 @@ export function loadConfig() {
     retryNotifyFirst: getBool('NTFY_RETRY_NOTIFY_FIRST', 'retryNotifyFirst', true),
     retryNotifyAfter: getInt('NTFY_RETRY_NOTIFY_AFTER', 'retryNotifyAfter', 3),
     idleNotify: getBool('NTFY_IDLE_NOTIFY', 'idleNotify', true),
+    debug: getBool('NTFY_DEBUG', 'debug', false),
+    debugPath: get('NTFY_DEBUG_PATH', 'debugPath', null),
   }
 }
 

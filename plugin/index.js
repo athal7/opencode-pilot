@@ -12,6 +12,7 @@ import { basename } from 'path'
 import { randomUUID } from 'crypto'
 import { sendNotification, sendPermissionNotification } from './notifier.js'
 import { loadConfig } from './config.js'
+import { initLogger, debug } from './logger.js'
 import {
   connectToService,
   disconnectFromService,
@@ -52,13 +53,23 @@ function parseRepoInfo(directory) {
 // Load configuration from config file and environment
 const config = loadConfig()
 
+// Initialize debug logger (writes to file when enabled, no-op when disabled)
+initLogger({ debug: config.debug, debugPath: config.debugPath })
+
 const Notify = async ({ $, client, directory, serverUrl }) => {
   if (!config.topic) {
+    debug('Plugin disabled: no topic configured')
     return {}
   }
   
   // Session ID for this plugin instance
   const sessionId = randomUUID()
+  
+  // Use directory from OpenCode (the actual repo), not process.cwd() (may be temp devcontainer dir)
+  // For devcontainer clones, show both repo and branch name
+  const repoName = parseRepoInfo(directory)
+  
+  debug(`Plugin initialized: topic=${config.topic}, callbackHost=${config.callbackHost || 'none'}, repo=${repoName}`)
   
   // Interactive mode state
   let serviceConnected = false
@@ -95,11 +106,8 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
     
     // Connect to service
     serviceConnected = await connectToService({ sessionId })
+    debug(`Service connection: ${serviceConnected ? 'connected' : 'failed'}`)
   }
-
-  // Use directory from OpenCode (the actual repo), not process.cwd() (may be temp devcontainer dir)
-  // For devcontainer clones, show both repo and branch name
-  const repoName = parseRepoInfo(directory)
   
   // Per-conversation state tracking (Issue #34)
   // Each conversation has its own idle timer, cancel state, etc.
@@ -156,11 +164,14 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
 
   return {
     event: async ({ event }) => {
+      debug(`Event: ${event.type}`)
+      
       // Handle session status events (idle, busy, retry notifications)
       if (event.type === 'session.status') {
         const status = event.properties?.status?.type
         // Extract conversation ID from event for per-conversation tracking (Issue #34)
         const conversationId = event.properties?.info?.id
+        debug(`Event: session.status, status=${status}, sessionId=${conversationId || 'unknown'}`)
         
         // Verify session belongs to our OpenCode instance (Issue #50)
         // Skip events for sessions from other OpenCode instances to prevent duplicates
@@ -214,6 +225,7 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
         
         // Handle idle status - set timer for THIS conversation
         if (status === 'idle' && !conv.idleTimer) {
+          debug(`Idle timer starting: ${config.idleDelayMs}ms for session ${conversationId}`)
           // Capture conversation ID in closure so notification goes to correct conversation
           const capturedSessionId = conversationId
           
@@ -263,6 +275,7 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
             })
           }, config.idleDelayMs)
         } else if (status === 'busy' && conv.idleTimer) {
+          debug(`Idle timer cancelled: session ${conversationId} now busy`)
           clearTimeout(conv.idleTimer)
           conv.idleTimer = null
         }

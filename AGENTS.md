@@ -97,5 +97,7 @@ If new config options were added or format changed, update the config file. Curr
 - `errorDebounceMs` (default: `60000`) - error debounce window
 - `retryNotifyFirst` (default: `true`) - notify on first retry
 - `retryNotifyAfter` (default: `3`) - notify after N retries
+- `debug` (default: `false`) - enable debug logging to file
+- `debugPath` - custom path for debug log file (default: `~/.config/opencode-ntfy/debug.log`)
 
 Environment variables override config file values with `NTFY_` prefix (e.g., `NTFY_TOPIC`).

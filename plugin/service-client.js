@@ -8,6 +8,7 @@
 // - Permission response callbacks
 
 import { createConnection } from 'net'
+import { debug } from './logger.js'
 
 // Default socket path (same as service)
 const DEFAULT_SOCKET_PATH = '/tmp/opencode-ntfy.sock'
@@ -46,6 +47,8 @@ export async function connectToService(options) {
   socketPath = options.socketPath || DEFAULT_SOCKET_PATH
   sessionId = options.sessionId
   
+  debug(`Service connecting: socketPath=${socketPath}, sessionId=${sessionId}`)
+  
   return new Promise((resolve) => {
     // Create new socket and capture reference to avoid race conditions
     // When a connection fails, error and close events both fire. If a
@@ -59,6 +62,7 @@ export async function connectToService(options) {
     let buffer = ''
     
     newSocket.on('connect', () => {
+      debug('Service connected, registering session')
       // Register session
       sendMessage({
         type: 'register',
@@ -87,6 +91,7 @@ export async function connectToService(options) {
     })
     
     newSocket.on('error', (err) => {
+      debug(`Service connection error: ${err.message}`)
       // Only clear global state if this is still the active socket
       if (socket === newSocket) {
         socket = null
@@ -95,6 +100,7 @@ export async function connectToService(options) {
     })
     
     newSocket.on('close', () => {
+      debug('Service connection closed')
       // Only clear global state if this is still the active socket
       // This prevents race conditions when a failed connection's close
       // event fires after a successful reconnection
@@ -189,8 +195,10 @@ function sendMessage(message) {
  * @param {Function} [connectResolve] - Resolve function for connection promise
  */
 function handleMessage(message, connectResolve) {
+  debug(`Service message received: type=${message.type}`)
   switch (message.type) {
     case 'registered':
+      debug('Session registered with service')
       if (connectResolve) {
         connectResolve(true)
       }

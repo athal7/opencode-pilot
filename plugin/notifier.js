@@ -1,6 +1,8 @@
 // ntfy HTTP client for sending notifications
 // Implements Issue #3: Notifier module
 
+import { debug } from './logger.js'
+
 const MAX_COMMAND_LENGTH = 100
 
 // Deduplication cache: track recently sent notifications to prevent duplicates
@@ -95,6 +97,7 @@ export async function sendNotification({ server, topic, title, message, priority
   // Deduplicate: skip if same notification sent recently
   const dedupeKey = simpleHash(`${topic}:${title}:${message}`)
   if (isDuplicate(dedupeKey)) {
+    debug(`Notification skipped (duplicate): ${title}`)
     return
   }
 
@@ -116,13 +119,15 @@ export async function sendNotification({ server, topic, title, message, priority
   }
 
   try {
-    await fetch(server, {
+    debug(`Notification sending: ${title}`)
+    const response = await fetch(server, {
       method: 'POST',
       headers: buildHeaders(authToken),
       body: JSON.stringify(body),
     })
-    // Silently ignore errors - notifications are best-effort
+    debug(`Notification sent: ${title} (status=${response.status})`)
   } catch (error) {
+    debug(`Notification failed: ${title} (error=${error.message})`)
     // Silently ignore - errors here shouldn't affect the user
   }
 }
@@ -153,6 +158,7 @@ export async function sendPermissionNotification({
   // Use tool+command+repoName (not nonce, which is unique per request)
   const dedupeKey = simpleHash(`perm:${topic}:${tool}:${command}:${repoName}`)
   if (isDuplicate(dedupeKey)) {
+    debug(`Permission notification skipped (duplicate): ${tool}`)
     return
   }
 
@@ -186,13 +192,15 @@ export async function sendPermissionNotification({
   }
 
   try {
-    await fetch(server, {
+    debug(`Permission notification sending: ${tool} for ${repoName}`)
+    const response = await fetch(server, {
       method: 'POST',
       headers: buildHeaders(authToken),
       body: JSON.stringify(body),
     })
-    // Silently ignore errors - notifications are best-effort
+    debug(`Permission notification sent: ${tool} (status=${response.status})`)
   } catch (error) {
+    debug(`Permission notification failed: ${tool} (error=${error.message})`)
     // Silently ignore - errors here shouldn't affect the user
   }
 }
