@@ -6,7 +6,7 @@ Before committing changes, verify documentation is updated to reflect code chang
 
 1. **README.md** - Update if changes affect:
    - Configuration options (config.json keys or env vars)
-   - CLI commands (`opencode-ntfy <command>`)
+   - CLI commands (`opencode-pilot <command>`)
    - Notification types or behavior
    - Installation or setup steps
    - Service management
@@ -25,7 +25,7 @@ After a PR is merged to main, follow this workflow to upgrade the local installa
 Watch the CI workflow until it completes (creates release via semantic-release):
 
 ```bash
-gh run watch -R athal7/opencode-ntfy
+gh run watch -R athal7/opencode-pilot
 ```
 
 ### 2. Verify Release Created
@@ -33,7 +33,7 @@ gh run watch -R athal7/opencode-ntfy
 Confirm the new release was published:
 
 ```bash
-gh release list -R athal7/opencode-ntfy -L 1
+gh release list -R athal7/opencode-pilot -L 1
 ```
 
 ### 3. Wait for Homebrew Formula Update
@@ -42,7 +42,7 @@ The formula is auto-updated after release. Poll until available:
 
 ```bash
 brew update
-brew info athal7/tap/opencode-ntfy | head -3
+brew info athal7/tap/opencode-pilot | head -3
 ```
 
 Compare version with the release. If not updated yet, wait and retry.
@@ -50,7 +50,7 @@ Compare version with the release. If not updated yet, wait and retry.
 ### 4. Upgrade Installation
 
 ```bash
-brew upgrade athal7/tap/opencode-ntfy
+brew upgrade athal7/tap/opencode-pilot
 ```
 
 ### 5. Run Setup
@@ -58,7 +58,7 @@ brew upgrade athal7/tap/opencode-ntfy
 Run setup to update plugin files in the OpenCode plugins directory:
 
 ```bash
-opencode-ntfy setup
+opencode-pilot setup
 ```
 
 ### 6. Restart Service
@@ -66,13 +66,13 @@ opencode-ntfy setup
 Always restart the callback service after upgrade:
 
 ```bash
-brew services restart opencode-ntfy
+brew services restart opencode-pilot
 ```
 
 ### 7. Verify Upgrade
 
 ```bash
-opencode-ntfy status
+opencode-pilot status
 ```
 
 ### 8. Config Migration (if needed)
@@ -80,10 +80,10 @@ opencode-ntfy status
 Check release notes for breaking changes:
 
 ```bash
-gh release view -R athal7/opencode-ntfy
+gh release view -R athal7/opencode-pilot
 ```
 
-Config file location: `~/.config/opencode-ntfy/config.json`
+Config file location: `~/.config/opencode-pilot/config.json`
 
 If new config options were added or format changed, update the config file. Current config keys:
 - `topic` (required) - ntfy topic name
@@ -98,6 +98,6 @@ If new config options were added or format changed, update the config file. Curr
 - `retryNotifyFirst` (default: `true`) - notify on first retry
 - `retryNotifyAfter` (default: `3`) - notify after N retries
 - `debug` (default: `false`) - enable debug logging to file
-- `debugPath` - custom path for debug log file (default: `~/.config/opencode-ntfy/debug.log`)
+- `debugPath` - custom path for debug log file (default: `~/.config/opencode-pilot/debug.log`)
 
 Environment variables override config file values with `NTFY_` prefix (e.g., `NTFY_TOPIC`).
