@@ -178,7 +178,6 @@ export async function pollOnce(options = {}) {
       const actionConfig = {
         ...repoConfig,
         repo_path: repoPath,
-        action: source.action || repoConfig.action || { type: "local" },
         session: source.session || repoConfig.session || {},
       };
 

@@ -63,12 +63,6 @@ const DEFAULT_CONFIG = {
       blocking_labels: ["blocked"],
     },
   },
-  cleanup: {
-    enabled: true,
-    on: ["merged", "closed"],
-    delay: "5m",
-    actions: ["kill_session"],
-  },
 };
 
 /**

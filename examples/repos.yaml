@@ -20,11 +20,7 @@ repos:
     wip_limits:
       max_concurrent: 3
 
-    # Default action for all repos in this org
-    action:
-      type: local  # "local" for opencode, "container" for ocdc
-
-    # Session naming template
+    # Session configuration
     session:
       name_template: "{type}-{number}"
 
@@ -59,9 +55,15 @@ repos:
     # Override repo path for this specific repo
     repo_path: ~/code/backend-monorepo
 
-    # Use devcontainers for this repo
-    action:
-      type: container
+    # Use devcontainers for isolated execution
+    # The /devcontainer command is handled by the opencode-devcontainers plugin
+    session:
+      prompt_template: |
+        /devcontainer issue-{number}
+
+        {title}
+
+        {body}
 
     # Sources define what to poll
     sources:

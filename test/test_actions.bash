@@ -104,7 +104,6 @@ test_actions_build_local_command() {
     
     const config = {
       repo_path: '~/code/myrepo',
-      action: { type: 'local' },
       session: { name_template: 'issue-{number}' }
     };
     
