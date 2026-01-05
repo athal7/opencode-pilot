@@ -1,5 +1,5 @@
-// Debug logging module for opencode-ntfy plugin
-// Writes to ~/.config/opencode-ntfy/debug.log when enabled via NTFY_DEBUG=true or config.debug
+// Debug logging module for opencode-pilot plugin
+// Writes to ~/.config/opencode-pilot/debug.log when enabled via NTFY_DEBUG=true or config.debug
 //
 // Usage:
 //   import { initLogger, debug } from './logger.js'
@@ -14,7 +14,7 @@ import { homedir } from 'os'
 export const MAX_LOG_SIZE = 1024 * 1024
 
 // Default log path
-const DEFAULT_LOG_PATH = join(homedir(), '.config', 'opencode-ntfy', 'debug.log')
+const DEFAULT_LOG_PATH = join(homedir(), '.config', 'opencode-pilot', 'debug.log')
 
 // Module state
 let enabled = false
