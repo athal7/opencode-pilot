@@ -1,12 +1,15 @@
 // Debug logging module for opencode-pilot plugin
 // Writes to ~/.config/opencode-pilot/debug.log when enabled via NTFY_DEBUG=true or config.debug
 //
+// Uses async (fire-and-forget) writes to avoid blocking the render thread.
+//
 // Usage:
 //   import { initLogger, debug } from './logger.js'
 //   initLogger({ debug: true, debugPath: '/custom/path.log' })
 //   debug('Event received', { type: 'session.status', status: 'idle' })
 
-import { appendFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs'
+import { appendFile, stat, unlink, mkdir } from 'fs/promises'
+import { existsSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 
@@ -19,6 +22,11 @@ const DEFAULT_LOG_PATH = join(homedir(), '.config', 'opencode-pilot', 'debug.log
 // Module state
 let enabled = false
 let logPath = DEFAULT_LOG_PATH
+
+// Write queue for batching
+const writeQueue = []
+let writeInProgress = false
+let dirEnsured = false
 
 /**
  * Initialize the logger with configuration
@@ -49,13 +57,17 @@ export function initLogger(options = {}) {
     logPath = DEFAULT_LOG_PATH
   }
   
-  // Create directory if it doesn't exist
+  // Reset directory ensured flag when path changes
+  dirEnsured = false
+  
+  // Create directory synchronously at init (one-time cost)
   if (enabled) {
     try {
       const dir = dirname(logPath)
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true })
       }
+      dirEnsured = true
     } catch {
       // Silently ignore directory creation errors
     }
@@ -63,7 +75,7 @@ export function initLogger(options = {}) {
 }
 
 /**
- * Write a debug log entry
+ * Write a debug log entry (fire-and-forget, non-blocking)
  * @param {string} message - Log message
  * @param {Object} [data] - Optional data to include
  */
@@ -72,54 +84,78 @@ export function debug(message, data) {
     return
   }
   
+  // Format log entry with ISO 8601 timestamp
+  const timestamp = new Date().toISOString()
+  let entry = `[${timestamp}] ${message}`
+  
+  // Append data if provided
+  if (data !== undefined) {
+    if (typeof data === 'object') {
+      entry += ' ' + JSON.stringify(data)
+    } else {
+      entry += ' ' + String(data)
+    }
+  }
+  
+  entry += '\n'
+  
+  // Queue the entry and trigger async processing
+  writeQueue.push(entry)
+  processQueue()
+}
+
+/**
+ * Process the write queue asynchronously
+ * Batches multiple entries into a single write for efficiency
+ */
+async function processQueue() {
+  // Prevent concurrent processing
+  if (writeInProgress || writeQueue.length === 0) {
+    return
+  }
+  
+  writeInProgress = true
+  
   try {
+    // Ensure directory exists (async, but only if not already done)
+    if (!dirEnsured) {
+      const dir = dirname(logPath)
+      await mkdir(dir, { recursive: true })
+      dirEnsured = true
+    }
+    
     // Check file size and rotate if needed
-    rotateIfNeeded()
+    await rotateIfNeeded()
     
-    // Format log entry with ISO 8601 timestamp
-    const timestamp = new Date().toISOString()
-    let entry = `[${timestamp}] ${message}`
-    
-    // Append data if provided
-    if (data !== undefined) {
-      if (typeof data === 'object') {
-        entry += ' ' + JSON.stringify(data)
-      } else {
-        entry += ' ' + String(data)
-      }
-    }
-    
-    entry += '\n'
-    
-    // Ensure directory exists
-    const dir = dirname(logPath)
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true })
-    }
+    // Drain queue into a single write
+    const entries = writeQueue.splice(0, writeQueue.length).join('')
     
     // Append to log file
-    appendFileSync(logPath, entry)
+    await appendFile(logPath, entries)
   } catch {
     // Silently ignore write errors to avoid affecting the plugin
+  } finally {
+    writeInProgress = false
+    
+    // Process any entries that were queued during our write
+    if (writeQueue.length > 0) {
+      // Use setImmediate to avoid stack buildup
+      setImmediate(processQueue)
+    }
   }
 }
 
 /**
  * Rotate log file if it exceeds MAX_LOG_SIZE
  */
-function rotateIfNeeded() {
+async function rotateIfNeeded() {
   try {
-    if (!existsSync(logPath)) {
-      return
-    }
-    
-    const stats = statSync(logPath)
+    const stats = await stat(logPath)
     if (stats.size > MAX_LOG_SIZE) {
       // Simple rotation: just truncate the file
-      // For more sophisticated rotation, could rename to .old first
-      unlinkSync(logPath)
+      await unlink(logPath)
     }
   } catch {
-    // Silently ignore rotation errors
+    // File doesn't exist or other error - ignore
   }
 }
