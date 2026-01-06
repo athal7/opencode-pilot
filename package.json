@@ -1,6 +1,6 @@
 {
   "name": "opencode-pilot",
-  "version": "0.1.0",
+  "version": "0.24.0",
   "type": "module",
   "description": "Automation layer for OpenCode - notifications, mobile UI, and workflow orchestration",
   "main": "plugin/index.js",
