@@ -1,4 +1,4 @@
-# Contributing to opencode-pilot
+# Contributing to opencode-ntfy
 
 Thanks for your interest in contributing!
 
@@ -6,8 +6,8 @@ Thanks for your interest in contributing!
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/athal7/opencode-pilot.git
-   cd opencode-pilot
+   git clone https://github.com/athal7/opencode-ntfy.git
+   cd opencode-ntfy
    ```
 
 2. Install the plugin locally for testing:
@@ -22,30 +22,43 @@ Thanks for your interest in contributing!
 
 ## Running Tests
 
-Run the test suite:
+Run the full test suite:
 ```bash
-npm test
+./test/run_tests.bash
 ```
 
-This runs `test/unit/*.test.js` using Node.js built-in test runner.
+The test suite includes:
+- **File structure tests** - Verify all plugin files exist
+- **Syntax validation** - Run `node --check` on all JS files
+- **Export structure tests** - Verify expected functions are exported
+- **Integration tests** - Test plugin loads in OpenCode without hanging (requires opencode CLI)
 
 ## Writing Tests
 
-Tests use Node.js built-in `node:test` and `node:assert` modules:
+Tests live in `test/` using bash test helpers from `test_helper.bash`.
 
-```javascript
-import { test, describe } from "node:test";
-import assert from "node:assert";
-import { myFunction } from "../../service/module.js";
+Example test:
+```bash
+test_my_feature() {
+  # Use assertions from test_helper.bash
+  assert_file_exists "$PLUGIN_DIR/myfile.js"
+  assert_contains "$output" "expected string"
+}
 
-describe("myFunction", () => {
-  test("returns expected value", () => {
-    assert.strictEqual(myFunction(), "expected");
-  });
-});
+# Register and run
+run_test "my_feature" "test_my_feature"
 ```
 
-Place test files in `test/unit/<module>.test.js`.
+For JavaScript unit tests, use Node.js inline:
+```bash
+test_function_works() {
+  node --input-type=module -e "
+    import { myFunction } from '../plugin/module.js';
+    if (myFunction() !== 'expected') throw new Error('Failed');
+    console.log('PASS');
+  " || return 1
+}
+```
 
 ## Code Style
 

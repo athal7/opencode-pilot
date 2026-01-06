@@ -1,18 +1,5 @@
 # Agent Instructions
 
-## Testing
-
-The project uses Node.js built-in test runner for unit tests:
-
-```bash
-npm test  # Runs test/unit/*.test.js
-```
-
-When adding new functionality:
-1. Write tests in `test/unit/<module>.test.js`
-2. Use `node:test` and `node:assert` (no external test frameworks)
-3. Follow existing test patterns (see `test/unit/paths.test.js`)
-
 ## Pre-Commit: Documentation Check
 
 Before committing changes, verify documentation is updated to reflect code changes:
@@ -82,21 +69,3 @@ Configuration has three sections:
 Template files: `~/.config/opencode-pilot/templates/*.md`
 
 See [examples/config.yaml](examples/config.yaml) for a complete example.
-
-### Identity Configuration
-
-Bot identity for autonomous actions is configured in `~/.config/opencode-pilot/config.yaml`:
-
-```yaml
-identity:
-  bot:
-    github_app_id: "${GITHUB_APP_ID}"
-    github_app_installation_id: "${GITHUB_APP_INSTALLATION_ID}"
-    github_app_private_key_path: "~/.config/opencode-pilot/app.pem"
-    github_app_slug: "my-pilot-app"
-  policy:
-    autonomous: bot
-    interactive: user
-```
-
-Per-repo overrides can change the policy or bot credentials. See [examples/config.yaml](examples/config.yaml).

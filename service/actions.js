@@ -9,12 +9,6 @@ import { spawn } from "child_process";
 import { readFileSync, existsSync } from "fs";
 import { debug } from "./logger.js";
 import { getNestedValue } from "./utils.js";
-import { resolveIdentity } from "./repo-config.js";
-import {
-  isGitHubAppConfigured,
-  getGitHubAppToken,
-  getGitHubAppIdentity,
-} from "./github-app.js";
 import path from "path";
 import os from "os";
 
@@ -232,50 +226,36 @@ export function buildCommand(item, config) {
 }
 
 /**
- * Build environment variables for an action based on identity configuration
- *
- * Returns an object with environment variables to inject into the spawned process.
- * If identity is configured for the session type, includes:
- * - GH_TOKEN and GITHUB_TOKEN for GitHub operations
- * - GIT_AUTHOR_NAME and GIT_COMMITTER_NAME for git commits
- * - GIT_AUTHOR_EMAIL and GIT_COMMITTER_EMAIL for git commits
- * - OPENCODE_SESSION_TYPE to indicate the session type
- *
- * Bot identity requires a GitHub App configuration.
- *
- * @param {string} repoKey - Repository identifier (e.g., "myorg/backend")
- * @param {string} sessionType - Session type: 'autonomous' or 'interactive'
- * @returns {Promise<{OPENCODE_SESSION_TYPE: string, GH_TOKEN?: string, GITHUB_TOKEN?: string, GIT_AUTHOR_NAME?: string, GIT_COMMITTER_NAME?: string, GIT_AUTHOR_EMAIL?: string, GIT_COMMITTER_EMAIL?: string}>} Environment variables to inject
+ * Execute a spawn command and return a promise
  */
-export async function buildEnvForAction(repoKey, sessionType) {
-  const env = {
-    OPENCODE_SESSION_TYPE: sessionType,
-  };
+function runSpawn(args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const [cmd, ...cmdArgs] = args;
+    const spawnOpts = {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...options,
+    };
+    const child = spawn(cmd, cmdArgs, spawnOpts);
 
-  const identity = resolveIdentity(repoKey, sessionType);
+    let stdout = "";
+    let stderr = "";
 
-  if (identity && isGitHubAppConfigured(identity)) {
-    try {
-      const token = await getGitHubAppToken(identity);
-      env.GH_TOKEN = token;
-      env.GITHUB_TOKEN = token;
+    child.stdout.on("data", (data) => {
+      stdout += data.toString();
+    });
 
-      // Use GitHub App identity for git commits
-      const appIdentity = getGitHubAppIdentity(identity);
-      env.GIT_AUTHOR_NAME = appIdentity.name;
-      env.GIT_COMMITTER_NAME = appIdentity.name;
-      env.GIT_AUTHOR_EMAIL = appIdentity.email;
-      env.GIT_COMMITTER_EMAIL = appIdentity.email;
+    child.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
 
-      debug(`buildEnvForAction: using GitHub App identity ${appIdentity.name}`);
-    } catch (error) {
-      // Log error but continue without bot identity - falls back to user's env
-      debug(`buildEnvForAction: failed to get GitHub App token, falling back to user identity: ${error.message}`);
-      console.warn(`[actions] GitHub App token fetch failed for ${repoKey}: ${error.message}`);
-    }
-  }
+    child.on("close", (code) => {
+      resolve({ stdout, stderr, exitCode: code, success: code === 0 });
+    });
 
-  return env;
+    child.on("error", (err) => {
+      reject(err);
+    });
+  });
 }
 
 /**
@@ -284,31 +264,21 @@ export async function buildEnvForAction(repoKey, sessionType) {
  * @param {object} config - Repo config with action settings
  * @param {object} [options] - Execution options
  * @param {boolean} [options.dryRun] - If true, return command without executing
- * @param {string} [options.sessionType] - Session type: 'autonomous' or 'interactive' (default: 'autonomous')
  * @returns {Promise<object>} Result with command, stdout, stderr, exitCode
  */
 export async function executeAction(item, config, options = {}) {
-  const { dryRun = false, sessionType = "autonomous" } = options;
   const cmdInfo = getCommandInfo(item, config);
   const command = buildCommand(item, config); // For logging/display
 
   debug(`executeAction: command=${command}`);
   debug(`executeAction: args=${JSON.stringify(cmdInfo.args)}, cwd=${cmdInfo.cwd}`);
-  debug(`executeAction: sessionType=${sessionType}`);
 
-  if (dryRun) {
+  if (options.dryRun) {
     return {
       command,
       dryRun: true,
     };
   }
-
-  // Build environment with identity injection
-  const repoKey = item.repo_key || config.repo_key || "";
-  const identityEnv = await buildEnvForAction(repoKey, sessionType);
-  const env = { ...process.env, ...identityEnv };
-
-  debug(`executeAction: identity env keys=${Object.keys(identityEnv).join(", ")}`);
 
   // Execute opencode run in background (detached)
   // We don't wait for completion since sessions can run for a long time
@@ -317,17 +287,15 @@ export async function executeAction(item, config, options = {}) {
   const child = spawn(cmd, cmdArgs, {
     cwd: cmdInfo.cwd,
     detached: true,
-    stdio: "ignore",
-    env,
+    stdio: 'ignore',
   });
   child.unref();
-
+  
   debug(`executeAction: spawned pid=${child.pid}`);
   return {
     command,
     success: true,
     pid: child.pid,
-    sessionType,
   };
 }
 
