@@ -49,21 +49,6 @@ describe('Path naming consistency', () => {
     });
   });
   
-  describe('service-client.js', () => {
-    const clientPath = join(PLUGIN_DIR, 'service-client.js');
-    const content = readFileSync(clientPath, 'utf8');
-    
-    test('uses opencode-pilot socket path', () => {
-      assert.match(content, /opencode-pilot\.sock/,
-        'service-client.js should reference opencode-pilot socket path');
-    });
-    
-    test('does not reference old opencode-ntfy socket path', () => {
-      assert.doesNotMatch(content, /opencode-ntfy\.sock/,
-        'service-client.js should not reference old opencode-ntfy socket name');
-    });
-  });
-  
   describe('server.js', () => {
     const serverPath = join(SERVICE_DIR, 'server.js');
     const content = readFileSync(serverPath, 'utf8');

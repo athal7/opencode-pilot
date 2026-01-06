@@ -8,18 +8,9 @@
 // See README.md for full configuration options.
 
 import { basename } from 'path'
-import { randomUUID } from 'crypto'
-import { sendNotification, sendPermissionNotification } from './notifier.js'
+import { sendNotification } from './notifier.js'
 import { loadConfig } from './config.js'
 import { initLogger, debug } from './logger.js'
-import {
-  connectToService,
-  disconnectFromService,
-  isConnected,
-  requestNonce,
-  setPermissionHandler,
-  tryReconnect,
-} from './service-client.js'
 
 /**
  * Parse directory path to extract repo name (and branch if in devcontainer clone)
@@ -55,58 +46,17 @@ const config = loadConfig()
 // Initialize debug logger (writes to file when enabled, no-op when disabled)
 initLogger({ debug: config.debug, debugPath: config.debugPath })
 
-const Notify = async ({ $, client, directory, serverUrl }) => {
+const Notify = async ({ client, directory }) => {
   if (!config.topic) {
     debug('Plugin disabled: no topic configured')
     return {}
   }
   
-  // Session ID for this plugin instance
-  const sessionId = randomUUID()
-  
   // Use directory from OpenCode (the actual repo), not process.cwd() (may be temp devcontainer dir)
   // For devcontainer clones, show both repo and branch name
   const repoName = parseRepoInfo(directory)
   
-  debug(`Plugin initialized: topic=${config.topic}, callbackHost=${config.callbackHost || 'none'}, repo=${repoName}`)
-  
-  // Interactive mode state
-  let serviceConnected = false
-  
-  if (config.callbackHost) {
-    // Set up permission response handler
-    setPermissionHandler(async (permissionId, response) => {
-      // Map response to OpenCode permission action
-      let action
-      switch (response) {
-        case 'once':
-          action = 'allow'
-          break
-        case 'always':
-          action = 'allowAlways'
-          break
-        case 'reject':
-          action = 'deny'
-          break
-        default:
-          return
-      }
-      
-      // Submit permission response to OpenCode
-      try {
-        await client.permission.respond({
-          id: permissionId,
-          action,
-        })
-      } catch (error) {
-        // Silently ignore - errors here shouldn't affect the user
-      }
-    })
-    
-    // Connect to service
-    serviceConnected = await connectToService({ sessionId })
-    debug(`Service connection: ${serviceConnected ? 'connected' : 'failed'}`)
-  }
+  debug(`Plugin initialized: topic=${config.topic}, repo=${repoName}`)
   
   // Per-conversation state tracking (Issue #34)
   // Each conversation has its own idle timer, cancel state, etc.
@@ -241,37 +191,12 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
               return
             }
             
-            // Build "Open Session" action if serverUrl and callbackHost are available
-            // URL points to the mobile-friendly UI served by the callback service
-            // The mobile UI proxies requests to OpenCode's API
-            let actions
-            if (serverUrl && config.callbackHost && capturedSessionId) {
-              try {
-                const opencodeUrl = new URL(serverUrl)
-                const opencodePort = opencodeUrl.port || (opencodeUrl.protocol === 'https:' ? 443 : 80)
-                // Mobile URL format: /m/{opencodePort}/{repoName}/session/{sessionId}
-                // Use HTTPS (via Tailscale Serve) when callbackHttps is enabled
-                const protocol = config.callbackHttps ? 'https' : 'http'
-                const portSuffix = config.callbackHttps ? '' : `:${config.callbackPort}`
-                const mobileUrl = `${protocol}://${config.callbackHost}${portSuffix}/m/${opencodePort}/${repoName}/session/${capturedSessionId}`
-                actions = [{
-                  action: 'view',
-                  label: 'Open Session',
-                  url: mobileUrl,
-                  clear: true,
-                }]
-              } catch {
-                // Silently ignore URL parsing errors
-              }
-            }
-            
             await sendNotification({
               server: config.server,
               topic: config.topic,
               title: `Idle (${repoName})`,
               message: 'Session waiting for input',
               authToken: config.authToken,
-              actions,
             })
           }, config.idleDelayMs)
         } else if (status === 'busy' && conv.idleTimer) {
@@ -301,28 +226,6 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
             event.properties?.error?.type ||
             'Unknown error'
           
-          // Build "Open Session" action if serverUrl and callbackHost are available
-          // Extract session ID from event properties
-          const errorSessionId = event.properties?.info?.id || event.properties?.sessionId
-          let actions
-          if (serverUrl && config.callbackHost && errorSessionId) {
-            try {
-              const opencodeUrl = new URL(serverUrl)
-              const opencodePort = opencodeUrl.port || (opencodeUrl.protocol === 'https:' ? 443 : 80)
-              const protocol = config.callbackHttps ? 'https' : 'http'
-              const portSuffix = config.callbackHttps ? '' : `:${config.callbackPort}`
-              const mobileUrl = `${protocol}://${config.callbackHost}${portSuffix}/m/${opencodePort}/${repoName}/session/${errorSessionId}`
-              actions = [{
-                action: 'view',
-                label: 'Open Session',
-                url: mobileUrl,
-                clear: true,
-              }]
-            } catch {
-              // Silently ignore URL parsing errors
-            }
-          }
-          
           await sendNotification({
             server: config.server,
             topic: config.topic,
@@ -331,59 +234,7 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
             priority: 5,
             tags: ['warning'],
             authToken: config.authToken,
-            actions,
           })
-        }
-      }
-      
-      // Handle permission.updated events (interactive permissions)
-      if (event.type === 'permission.updated') {
-        const permission = event.properties?.permission
-        if (!permission || permission.status !== 'pending' || !permission.id) {
-          return
-        }
-        
-        // Only send interactive notifications if callbackHost is configured
-        if (!config.callbackHost) {
-          return
-        }
-        
-        // Try to reconnect if not connected (Issue #41: reconnect on permission request)
-        if (!isConnected()) {
-          const reconnected = await tryReconnect()
-          if (!reconnected) {
-            return
-          }
-        }
-        
-        const permissionId = permission.id
-        const tool = permission.tool || 'Unknown tool'
-        // Use pattern (the actual command) if available, fall back to description
-        const patterns = permission.pattern || permission.patterns
-        const command = Array.isArray(patterns) ? patterns.join(' ') : (patterns || permission.description || 'Permission requested')
-        
-        try {
-          // Request nonce from service
-          const nonce = await requestNonce(permissionId)
-          
-          // Build callback URL (use HTTPS via Tailscale Serve when configured)
-          const protocol = config.callbackHttps ? 'https' : 'http'
-          const portSuffix = config.callbackHttps ? '' : `:${config.callbackPort}`
-          const callbackUrl = `${protocol}://${config.callbackHost}${portSuffix}/callback`
-          
-          // Send permission notification with action buttons
-          await sendPermissionNotification({
-            server: config.server,
-            topic: config.topic,
-            callbackUrl,
-            nonce,
-            tool,
-            command,
-            repoName,
-            authToken: config.authToken,
-          })
-        } catch (error) {
-          // Silently ignore - errors here shouldn't affect the user
         }
       }
     },
@@ -391,7 +242,7 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
     // Cleanup on shutdown
     shutdown: async () => {
       // Clear all conversation idle timers
-      for (const [conversationId, conv] of conversations) {
+      for (const [, conv] of conversations) {
         if (conv.idleTimer) {
           clearTimeout(conv.idleTimer)
           conv.idleTimer = null
@@ -402,11 +253,6 @@ const Notify = async ({ $, client, directory, serverUrl }) => {
       // Clear session ownership caches (Issue #50)
       verifiedSessions.clear()
       rejectedSessions.clear()
-      
-      // Use isConnected() as the source of truth (socket may have closed unexpectedly)
-      if (isConnected()) {
-        await disconnectFromService()
-      }
     },
   }
 }

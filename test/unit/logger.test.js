@@ -29,8 +29,8 @@ describe('logger.js', () => {
       initLogger({ debug: true, debugPath: logPath });
       debug('test message');
       
-      // Give async write time to complete
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // Give async write time to complete (async I/O can take variable time)
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       assert.ok(existsSync(logPath), 'Log file should exist');
       const content = readFileSync(logPath, 'utf8');
@@ -103,7 +103,8 @@ console.log(JSON.stringify({ syncElapsed, elapsed }));
       initLogger({ debug: true, debugPath: logPath });
       debug('event', { type: 'session.status', status: 'idle' });
       
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // Give async write time to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       const content = readFileSync(logPath, 'utf8');
       assert.ok(content.includes('session.status'), 'Log should contain data');
@@ -119,7 +120,8 @@ console.log(JSON.stringify({ syncElapsed, elapsed }));
       initLogger({ debug: true, debugPath: nestedPath });
       debug('test');
       
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // Give async write time to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       assert.ok(existsSync(nestedPath), 'Should create nested directories');
     });

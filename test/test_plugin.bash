@@ -28,22 +28,6 @@ test_plugin_notifier_exists() {
   assert_file_exists "$PLUGIN_DIR/notifier.js"
 }
 
-test_plugin_callback_exists() {
-  assert_file_exists "$PLUGIN_DIR/callback.js"
-}
-
-test_plugin_hostname_exists() {
-  assert_file_exists "$PLUGIN_DIR/hostname.js"
-}
-
-test_plugin_nonces_exists() {
-  assert_file_exists "$PLUGIN_DIR/nonces.js"
-}
-
-test_plugin_service_client_exists() {
-  assert_file_exists "$PLUGIN_DIR/service-client.js"
-}
-
 # =============================================================================
 # JavaScript Syntax Validation Tests
 # =============================================================================
@@ -66,50 +50,6 @@ test_notifier_js_syntax() {
   fi
   node --check "$PLUGIN_DIR/notifier.js" 2>&1 || {
     echo "notifier.js has syntax errors"
-    return 1
-  }
-}
-
-test_callback_js_syntax() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  node --check "$PLUGIN_DIR/callback.js" 2>&1 || {
-    echo "callback.js has syntax errors"
-    return 1
-  }
-}
-
-test_hostname_js_syntax() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  node --check "$PLUGIN_DIR/hostname.js" 2>&1 || {
-    echo "hostname.js has syntax errors"
-    return 1
-  }
-}
-
-test_nonces_js_syntax() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  node --check "$PLUGIN_DIR/nonces.js" 2>&1 || {
-    echo "nonces.js has syntax errors"
-    return 1
-  }
-}
-
-test_service_client_js_syntax() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  node --check "$PLUGIN_DIR/service-client.js" 2>&1 || {
-    echo "service-client.js has syntax errors"
     return 1
   }
 }
@@ -264,82 +204,6 @@ test_notifier_exports_send_notification() {
   }
 }
 
-test_notifier_exports_send_permission_notification() {
-  grep -q "export.*sendPermissionNotification" "$PLUGIN_DIR/notifier.js" || {
-    echo "sendPermissionNotification export not found in notifier.js"
-    return 1
-  }
-}
-
-test_callback_exports_start_callback_server() {
-  grep -q "export.*startCallbackServer" "$PLUGIN_DIR/callback.js" || {
-    echo "startCallbackServer export not found in callback.js"
-    return 1
-  }
-}
-
-test_hostname_exports_discover_callback_host() {
-  grep -q "export.*discoverCallbackHost" "$PLUGIN_DIR/hostname.js" || {
-    echo "discoverCallbackHost export not found in hostname.js"
-    return 1
-  }
-}
-
-test_nonces_exports_create_nonce() {
-  grep -q "export.*createNonce" "$PLUGIN_DIR/nonces.js" || {
-    echo "createNonce export not found in nonces.js"
-    return 1
-  }
-}
-
-test_nonces_exports_consume_nonce() {
-  grep -q "export.*consumeNonce" "$PLUGIN_DIR/nonces.js" || {
-    echo "consumeNonce export not found in nonces.js"
-    return 1
-  }
-}
-
-# =============================================================================
-# Service Integration Tests
-# =============================================================================
-
-test_index_imports_service_client() {
-  grep -q "import.*service-client\|from.*service-client" "$PLUGIN_DIR/index.js" || {
-    echo "service-client import not found in index.js"
-    return 1
-  }
-}
-
-test_index_connects_to_service() {
-  grep -q "connectToService" "$PLUGIN_DIR/index.js" || {
-    echo "connectToService call not found in index.js"
-    return 1
-  }
-}
-
-test_index_handles_permission_updated() {
-  grep -q "permission.updated\|permission\.updated" "$PLUGIN_DIR/index.js" || {
-    echo "permission.updated event handling not found in index.js"
-    return 1
-  }
-}
-
-test_index_imports_try_reconnect() {
-  grep -q "tryReconnect" "$PLUGIN_DIR/index.js" || {
-    echo "tryReconnect import not found in index.js"
-    return 1
-  }
-}
-
-test_index_tries_reconnect_on_permission() {
-  # Plugin should try to reconnect when handling permission events if not connected
-  # This is critical for Issue #41 - permission notifications not received
-  grep -A 20 "permission.updated" "$PLUGIN_DIR/index.js" | grep -q "tryReconnect" || {
-    echo "tryReconnect call not found in permission.updated handler"
-    return 1
-  }
-}
-
 # =============================================================================
 # Retry Event Handling Tests (Issue #7)
 # =============================================================================
@@ -428,14 +292,7 @@ test_sends_error_notification_with_urgent_priority() {
   }
 }
 
-test_error_notification_includes_session_link() {
-  # Verify error notifications can include "Open Session" action
-  # Check that session.error handler builds actions similar to idle handler
-  grep -A 40 "session.error" "$PLUGIN_DIR/index.js" | grep -q "Open Session" || {
-    echo "Error notifications should include 'Open Session' action"
-    return 1
-  }
-}
+
 
 # =============================================================================
 # Counter Reset Tests (Issue #7)
@@ -746,11 +603,7 @@ echo "Plugin File Structure Tests:"
 
 for test_func in \
   test_plugin_index_exists \
-  test_plugin_notifier_exists \
-  test_plugin_callback_exists \
-  test_plugin_hostname_exists \
-  test_plugin_nonces_exists \
-  test_plugin_service_client_exists
+  test_plugin_notifier_exists
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -760,11 +613,7 @@ echo "JavaScript Syntax Validation Tests:"
 
 for test_func in \
   test_index_js_syntax \
-  test_notifier_js_syntax \
-  test_callback_js_syntax \
-  test_hostname_js_syntax \
-  test_nonces_js_syntax \
-  test_service_client_js_syntax
+  test_notifier_js_syntax
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -805,25 +654,7 @@ echo "Plugin Export Structure Tests:"
 for test_func in \
   test_index_exports_notify \
   test_index_has_default_export \
-  test_notifier_exports_send_notification \
-  test_notifier_exports_send_permission_notification \
-  test_callback_exports_start_callback_server \
-  test_hostname_exports_discover_callback_host \
-  test_nonces_exports_create_nonce \
-  test_nonces_exports_consume_nonce
-do
-  run_test "${test_func#test_}" "$test_func"
-done
-
-echo ""
-echo "Service Integration Tests:"
-
-for test_func in \
-  test_index_imports_service_client \
-  test_index_connects_to_service \
-  test_index_handles_permission_updated \
-  test_index_imports_try_reconnect \
-  test_index_tries_reconnect_on_permission
+  test_notifier_exports_send_notification
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -849,8 +680,7 @@ for test_func in \
   test_uses_error_notify_config \
   test_uses_error_debounce_config \
   test_tracks_last_error_time \
-  test_sends_error_notification_with_urgent_priority \
-  test_error_notification_includes_session_link
+  test_sends_error_notification_with_urgent_priority
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -953,14 +783,6 @@ test_clears_conversation_state_on_cancel() {
 # Session Tracking and Open Session Action Tests (Issue #27)
 # =============================================================================
 
-test_notify_accepts_server_url_param() {
-  # Notify function should accept serverUrl parameter for building session URLs
-  grep -q "serverUrl" "$PLUGIN_DIR/index.js" || {
-    echo "serverUrl parameter not found in index.js"
-    return 1
-  }
-}
-
 test_tracks_current_session_id() {
   # Plugin should track current session ID from session events
   grep -q "currentSessionId\|sessionId" "$PLUGIN_DIR/index.js" || {
@@ -977,40 +799,7 @@ test_extracts_session_id_from_status_event() {
   }
 }
 
-test_idle_notification_can_include_actions() {
-  # Idle notification sendNotification call should support actions parameter
-  # Check that the idle notification code block references actions
-  grep -A 15 "Idle.*repoName" "$PLUGIN_DIR/index.js" | grep -q "actions" || {
-    echo "actions parameter not found in idle notification"
-    return 1
-  }
-}
 
-test_builds_open_session_url() {
-  # When serverUrl and callbackHost available, should build session URL
-  grep -q "session" "$PLUGIN_DIR/index.js" && \
-  grep -q "callbackHost\|serverUrl" "$PLUGIN_DIR/index.js" || {
-    echo "Session URL building not found"
-    return 1
-  }
-}
-
-test_uses_mobile_ui_url() {
-  # URL should point to the mobile-friendly UI served by the callback service
-  # Format: /m/{opencodePort}/{repoName}/session/{sessionId}
-  grep -q '/m/' "$PLUGIN_DIR/index.js" || {
-    echo "Mobile UI URL format (/m/) not found in index.js"
-    return 1
-  }
-}
-
-test_uses_callback_host_for_session_url() {
-  # Should use callbackHost (Tailscale hostname) for the session URL
-  grep -q "callbackHost" "$PLUGIN_DIR/index.js" || {
-    echo "callbackHost not used for session URL"
-    return 1
-  }
-}
 
 # =============================================================================
 # Devcontainer Path Parsing Tests
@@ -1128,16 +917,11 @@ do
 done
 
 echo ""
-echo "Session Tracking and Open Session Action Tests (Issue #27):"
+echo "Session Tracking Tests:"
 
 for test_func in \
-  test_notify_accepts_server_url_param \
   test_tracks_current_session_id \
-  test_extracts_session_id_from_status_event \
-  test_idle_notification_can_include_actions \
-  test_builds_open_session_url \
-  test_uses_mobile_ui_url \
-  test_uses_callback_host_for_session_url
+  test_extracts_session_id_from_status_event
 do
   run_test "${test_func#test_}" "$test_func"
 done
