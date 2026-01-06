@@ -107,14 +107,16 @@ export function transformItems(items, idTemplate) {
 
 /**
  * Parse JSON text as an array with error handling
+ * Supports various response formats: arrays, or objects with items/issues/nodes/reminders/meetings keys
  */
-function parseJsonArray(text, sourceName) {
+export function parseJsonArray(text, sourceName) {
   try {
     const data = JSON.parse(text);
     if (Array.isArray(data)) return data;
     if (data.items) return data.items;
     if (data.issues) return data.issues;
     if (data.nodes) return data.nodes;
+    if (data.reminders) return data.reminders;
     return [data];
   } catch (err) {
     console.error(`[poller] Failed to parse ${sourceName} response:`, err.message);

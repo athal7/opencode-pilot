@@ -312,6 +312,84 @@ describe('poller.js', () => {
     });
   });
 
+  describe('parseJsonArray', () => {
+    test('parses direct array response', async () => {
+      const { parseJsonArray } = await import('../../service/poller.js');
+      
+      const text = JSON.stringify([{ id: '1' }, { id: '2' }]);
+      const result = parseJsonArray(text, 'test');
+      
+      assert.strictEqual(result.length, 2);
+      assert.strictEqual(result[0].id, '1');
+    });
+
+    test('extracts items array from response', async () => {
+      const { parseJsonArray } = await import('../../service/poller.js');
+      
+      const text = JSON.stringify({ items: [{ id: '1' }], total: 1 });
+      const result = parseJsonArray(text, 'test');
+      
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0].id, '1');
+    });
+
+    test('extracts issues array from response', async () => {
+      const { parseJsonArray } = await import('../../service/poller.js');
+      
+      const text = JSON.stringify({ issues: [{ id: '1' }], total: 1 });
+      const result = parseJsonArray(text, 'test');
+      
+      assert.strictEqual(result.length, 1);
+    });
+
+    test('extracts nodes array from response', async () => {
+      const { parseJsonArray } = await import('../../service/poller.js');
+      
+      const text = JSON.stringify({ nodes: [{ id: '1' }], total: 1 });
+      const result = parseJsonArray(text, 'test');
+      
+      assert.strictEqual(result.length, 1);
+    });
+
+    test('extracts reminders array from Apple Reminders response', async () => {
+      const { parseJsonArray } = await import('../../service/poller.js');
+      
+      const text = JSON.stringify({
+        reminders: [
+          { id: 'reminder-1', name: 'Task 1', completed: false },
+          { id: 'reminder-2', name: 'Task 2', completed: false },
+          { id: 'reminder-3', name: 'Task 3', completed: false }
+        ],
+        count: 3
+      });
+      const result = parseJsonArray(text, 'agent-tasks');
+      
+      assert.strictEqual(result.length, 3);
+      assert.strictEqual(result[0].id, 'reminder-1');
+      assert.strictEqual(result[0].name, 'Task 1');
+      assert.strictEqual(result[1].id, 'reminder-2');
+      assert.strictEqual(result[2].id, 'reminder-3');
+    });
+
+    test('wraps single object as array', async () => {
+      const { parseJsonArray } = await import('../../service/poller.js');
+      
+      const text = JSON.stringify({ id: '1', title: 'Single item' });
+      const result = parseJsonArray(text, 'test');
+      
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0].id, '1');
+    });
+
+    test('returns empty array for invalid JSON', async () => {
+      const { parseJsonArray } = await import('../../service/poller.js');
+      
+      const result = parseJsonArray('not valid json', 'test');
+      
+      assert.strictEqual(result.length, 0);
+    });
+  });
+
   describe('transformItems with mappings', () => {
     test('applies mappings to all items', async () => {
       const { transformItems, applyMappings } = await import('../../service/poller.js');
