@@ -2,6 +2,8 @@
 
 Automation layer for [OpenCode](https://github.com/sst/opencode) - notifications and workflow orchestration.
 
+> **Note**: This is a community project and is not built by or affiliated with the OpenCode team.
+
 ## Features
 
 - **Idle notifications** - Get notified when OpenCode has been waiting for input
