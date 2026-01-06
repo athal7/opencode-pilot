@@ -51,9 +51,9 @@ test_cli_help_shows_usage() {
   }
 }
 
-test_cli_help_shows_setup_command() {
-  "$CLI_PATH" help 2>&1 | grep -q "setup" || {
-    echo "help command should show setup command"
+test_cli_help_shows_start_command() {
+  "$CLI_PATH" help 2>&1 | grep -q "start" || {
+    echo "help command should show start command"
     return 1
   }
 }
@@ -61,6 +61,13 @@ test_cli_help_shows_setup_command() {
 test_cli_help_shows_status_command() {
   "$CLI_PATH" help 2>&1 | grep -q "status" || {
     echo "help command should show status command"
+    return 1
+  }
+}
+
+test_cli_help_shows_config_command() {
+  "$CLI_PATH" help 2>&1 | grep -q "config" || {
+    echo "help command should show config command"
     return 1
   }
 }
@@ -87,34 +94,23 @@ test_cli_unknown_command_shows_error() {
 # Status Command Tests
 # =============================================================================
 
-test_cli_status_shows_plugin_info() {
+test_cli_status_shows_service_info() {
   local output
   output=$("$CLI_PATH" status 2>&1) || true
   
-  echo "$output" | grep -qi "plugin" || {
-    echo "status should show plugin info"
+  echo "$output" | grep -qi "service" || {
+    echo "status should show service info"
     echo "Output: $output"
     return 1
   }
 }
 
-test_cli_status_shows_notification_config() {
+test_cli_status_shows_config_info() {
   local output
   output=$("$CLI_PATH" status 2>&1) || true
   
-  echo "$output" | grep -qi "notification\|topic" || {
-    echo "status should show notification config"
-    echo "Output: $output"
-    return 1
-  }
-}
-
-test_cli_status_shows_polling_config() {
-  local output
-  output=$("$CLI_PATH" status 2>&1) || true
-  
-  echo "$output" | grep -qi "polling\|repos.yaml" || {
-    echo "status should show polling config"
+  echo "$output" | grep -qi "config" || {
+    echo "status should show config info"
     echo "Output: $output"
     return 1
   }
@@ -139,8 +135,9 @@ echo "Help Command Tests:"
 
 for test_func in \
   test_cli_help_shows_usage \
-  test_cli_help_shows_setup_command \
+  test_cli_help_shows_start_command \
   test_cli_help_shows_status_command \
+  test_cli_help_shows_config_command \
   test_cli_default_shows_help \
   test_cli_unknown_command_shows_error
 do
@@ -151,9 +148,8 @@ echo ""
 echo "Status Command Tests:"
 
 for test_func in \
-  test_cli_status_shows_plugin_info \
-  test_cli_status_shows_notification_config \
-  test_cli_status_shows_polling_config
+  test_cli_status_shows_service_info \
+  test_cli_status_shows_config_info
 do
   run_test "${test_func#test_}" "$test_func"
 done

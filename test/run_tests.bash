@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "========================================"
-echo "  opencode-ntfy test suite"
+echo "  opencode-pilot test suite"
 echo "========================================"
 echo ""
 

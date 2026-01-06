@@ -1,18 +1,22 @@
 #!/usr/bin/env node
 /**
- * opencode-pilot - CLI for opencode-pilot automation
+ * opencode-pilot - CLI for opencode-pilot automation daemon
  *
  * Commands:
- *   setup       Copy plugin files and configure OpenCode
- *   status      Show installation and service status
+ *   start       Start the polling service
+ *   status      Show service status
+ *   config      Validate and show configuration
+ *   test-source Test a polling source
+ *   test-mapping Test field mappings
  *   help        Show help
  */
 
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, cpSync, rmSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { execSync } from "child_process";
 import os from "os";
+import YAML from "yaml";
 
 // Get script directory for relative imports
 const __filename = fileURLToPath(import.meta.url);
@@ -32,29 +36,33 @@ function findServiceDir() {
   return candidates[0];
 }
 
-// Find plugin directory
-function findPluginDir() {
-  const candidates = [
-    join(__dirname, "..", "plugin"),                        // Development
-    join(__dirname, "..", "lib", "opencode-pilot", "plugin"), // Homebrew
-  ];
-  for (const dir of candidates) {
-    if (existsSync(join(dir, "index.js"))) {
-      return dir;
-    }
-  }
-  return null;
-}
-
 const serviceDir = findServiceDir();
 
 // Paths
-const OPENCODE_CONFIG_DIR = join(os.homedir(), ".config/opencode");
-const PLUGIN_NAME = "opencode-pilot";
-const PLUGIN_DEST = join(OPENCODE_CONFIG_DIR, "plugins", PLUGIN_NAME);
-const OPENCODE_CONFIG_FILE = join(OPENCODE_CONFIG_DIR, "opencode.json");
 const PILOT_CONFIG_FILE = join(os.homedir(), ".config/opencode-pilot/config.yaml");
 const PILOT_TEMPLATES_DIR = join(os.homedir(), ".config/opencode-pilot/templates");
+
+// Default port
+const DEFAULT_PORT = 4097;
+
+/**
+ * Load port from config file
+ * @returns {number} Port number
+ */
+function getPortFromConfig() {
+  try {
+    if (existsSync(PILOT_CONFIG_FILE)) {
+      const content = readFileSync(PILOT_CONFIG_FILE, "utf8");
+      const config = YAML.parse(content);
+      if (config?.port && typeof config.port === "number") {
+        return config.port;
+      }
+    }
+  } catch {
+    // Ignore errors, use default
+  }
+  return DEFAULT_PORT;
+}
 
 // Parse command line arguments
 function parseArgs(args) {
@@ -99,27 +107,25 @@ function parseArgs(args) {
 
 // Help text
 function showHelp() {
-  console.log(`opencode-pilot - Automation layer for OpenCode
+  console.log(`opencode-pilot - Automation daemon for OpenCode
 
 Usage:
   opencode-pilot <command> [options]
 
 Commands:
-  start                Start the callback service (foreground)
-  setup                Copy plugin files and configure OpenCode
-  status               Show installation and service status
+  start                Start the polling service (foreground)
+  status               Show service status
   config               Validate and show configuration
   test-source NAME     Test a source by fetching items and showing mappings
   test-mapping MCP     Test field mappings with sample JSON input
   help                 Show this help message
 
 The service handles:
-- Notification callbacks from ntfy
 - Polling for GitHub/Linear issues to work on
+- Spawning OpenCode sessions for ready items
 
 Examples:
   opencode-pilot start                   # Start service (foreground)
-  opencode-pilot setup                   # Initial setup
   opencode-pilot status                  # Check status
   opencode-pilot config                  # Validate and show config
   opencode-pilot test-source my-issues   # Test a source
@@ -140,14 +146,13 @@ async function startCommand() {
     process.exit(1);
   }
 
-  console.log("[opencode-pilot] Starting callback service...");
+  console.log("[opencode-pilot] Starting polling service...");
   
   // Dynamic import of the service module
   const { startService, stopService } = await import(serverPath);
   
   const config = {
-    httpPort: parseInt(process.env.NTFY_CALLBACK_PORT || "4097", 10),
-    socketPath: process.env.NTFY_SOCKET_PATH || "/tmp/opencode-pilot.sock",
+    httpPort: getPortFromConfig(),
   };
   
   const service = await startService(config);
@@ -170,179 +175,33 @@ async function startCommand() {
 }
 
 // ============================================================================
-// Setup Command
-// ============================================================================
-
-async function setupCommand() {
-  console.log("Setting up opencode-pilot...");
-  console.log("");
-
-  const pluginSource = findPluginDir();
-  if (!pluginSource) {
-    console.error("ERROR: Could not find plugin source files");
-    console.error("Install via: brew install athal7/tap/opencode-pilot");
-    process.exit(1);
-  }
-
-  console.log(`Source: ${pluginSource}`);
-  console.log(`Destination: ${PLUGIN_DEST}`);
-  console.log("");
-
-  // Backup existing config
-  if (existsSync(OPENCODE_CONFIG_FILE)) {
-    const backupFile = `${OPENCODE_CONFIG_FILE}.backup.${Date.now()}`;
-    try {
-      cpSync(OPENCODE_CONFIG_FILE, backupFile);
-      console.log(`Backup created: ${backupFile}`);
-    } catch (err) {
-      console.error("ERROR: Failed to create backup of opencode.json");
-      process.exit(1);
-    }
-  }
-
-  // Copy plugin files
-  mkdirSync(join(OPENCODE_CONFIG_DIR, "plugins"), { recursive: true });
-  if (existsSync(PLUGIN_DEST)) {
-    rmSync(PLUGIN_DEST, { recursive: true });
-  }
-  cpSync(pluginSource, PLUGIN_DEST, { recursive: true });
-  console.log("Plugin files copied.");
-
-  // Update opencode.json
-  let config = {};
-  if (existsSync(OPENCODE_CONFIG_FILE)) {
-    try {
-      config = JSON.parse(readFileSync(OPENCODE_CONFIG_FILE, "utf8"));
-    } catch {
-      config = {};
-    }
-  }
-
-  config.plugin = config.plugin || [];
-  const alreadyRegistered = config.plugin.some(p => p.includes(`plugins/${PLUGIN_NAME}`));
-
-  if (alreadyRegistered) {
-    console.log("Plugin already in opencode.json");
-  } else {
-    config.plugin.push(PLUGIN_DEST);
-    const tempFile = `${OPENCODE_CONFIG_FILE}.tmp`;
-    writeFileSync(tempFile, JSON.stringify(config, null, 2) + "\n");
-    const { renameSync } = await import("fs");
-    renameSync(tempFile, OPENCODE_CONFIG_FILE);
-    console.log("Added plugin to opencode.json");
-  }
-
-  // Try to restart service
-  try {
-    execSync("brew services restart opencode-pilot", { stdio: "pipe" });
-    console.log("");
-    console.log("Service restarted.");
-  } catch {
-    // Not installed via brew or service not available
-  }
-
-  console.log("");
-  console.log("Setup complete!");
-  console.log("");
-  console.log("Next steps:");
-  console.log("  1. Edit ~/.config/opencode-pilot/config.yaml");
-  console.log("  2. Run: opencode-pilot start");
-}
-
-// ============================================================================
 // Status Command
 // ============================================================================
-
-function getConfigValue(envVar, configKey, defaultValue = "") {
-  // Check env var first
-  if (process.env[envVar]) {
-    return process.env[envVar];
-  }
-
-  // Check config file
-  if (existsSync(PILOT_CONFIG_FILE)) {
-    try {
-      const config = JSON.parse(readFileSync(PILOT_CONFIG_FILE, "utf8"));
-      if (config[configKey] !== undefined && config[configKey] !== "") {
-        return config[configKey];
-      }
-    } catch {
-      // Ignore
-    }
-  }
-
-  return defaultValue;
-}
 
 function statusCommand() {
   console.log("opencode-pilot status");
   console.log("=====================");
   console.log("");
 
-  // Plugin installed?
-  if (existsSync(PLUGIN_DEST)) {
-    console.log(`Plugin: installed at ${PLUGIN_DEST}`);
-  } else {
-    console.log("Plugin: NOT INSTALLED (run: opencode-pilot setup)");
-  }
-
-  // Config?
-  if (existsSync(OPENCODE_CONFIG_FILE)) {
-    try {
-      const config = JSON.parse(readFileSync(OPENCODE_CONFIG_FILE, "utf8"));
-      const registered = (config.plugin || []).some(p => p.includes(`plugins/${PLUGIN_NAME}`));
-      if (registered) {
-        console.log("Config: plugin registered in opencode.json");
-      } else {
-        console.log("Config: plugin NOT in opencode.json");
-      }
-    } catch {
-      console.log("Config: could not parse opencode.json");
-    }
-  } else {
-    console.log("Config: opencode.json not found");
-  }
-
-  // Service running? Check if socket exists and HTTP responds
-  const socketPath = "/tmp/opencode-pilot.sock";
-  const servicePort = getConfigValue("NTFY_CALLBACK_PORT", "callbackPort", "4097");
+  // Service running? Check if HTTP responds
+  const servicePort = getPortFromConfig();
   
-  if (existsSync(socketPath)) {
-    // Socket exists, try health check
-    try {
-      const res = execSync(`curl -s -o /dev/null -w "%{http_code}" http://localhost:${servicePort}/health`, { encoding: "utf8", timeout: 2000 });
-      if (res.trim() === "200") {
-        console.log("Service: running");
-      } else {
-        console.log("Service: socket exists but not responding (run: opencode-pilot start)");
-      }
-    } catch {
-      console.log("Service: socket exists but health check failed");
+  try {
+    const res = execSync(`curl -s -o /dev/null -w "%{http_code}" http://localhost:${servicePort}/health`, { encoding: "utf8", timeout: 2000 });
+    if (res.trim() === "200") {
+      console.log("Service: running");
+    } else {
+      console.log("Service: not responding (run: opencode-pilot start)");
     }
-  } else {
+  } catch {
     console.log("Service: not running (run: opencode-pilot start)");
   }
 
-  // Notification configuration
-  console.log("");
-  console.log("Notification Configuration:");
-
-  const topic = getConfigValue("NTFY_TOPIC", "topic", "");
-  const server = getConfigValue("NTFY_SERVER", "server", "https://ntfy.sh");
-  const callbackHost = getConfigValue("NTFY_CALLBACK_HOST", "callbackHost", "");
-  const callbackPort = getConfigValue("NTFY_CALLBACK_PORT", "callbackPort", "4097");
-
-  console.log(`  topic: ${topic || "<not set>"}`);
-  console.log(`  server: ${server}`);
-  console.log(`  callbackHost: ${callbackHost || "<not set>"}`);
-  console.log(`  callbackPort: ${callbackPort}`);
-
   // Polling configuration
   console.log("");
-  console.log("Polling Configuration:");
+  console.log("Configuration:");
   if (existsSync(PILOT_CONFIG_FILE)) {
     console.log(`  config.yaml: ${PILOT_CONFIG_FILE}`);
-    console.log("  polling: enabled (handled by service)");
   } else {
     console.log(`  config.yaml: not found at ${PILOT_CONFIG_FILE}`);
     console.log("  polling: disabled");
@@ -377,22 +236,6 @@ async function configCommand() {
   } catch (err) {
     console.log(`✗ Failed to parse config: ${err.message}`);
     process.exit(1);
-  }
-
-  // Validate notifications section
-  console.log("");
-  console.log("Notifications:");
-  const notifications = config.notifications || {};
-  if (notifications.topic) {
-    console.log(`  ✓ topic: ${notifications.topic.substring(0, 8)}...`);
-  } else {
-    console.log("  ✗ topic: not set (required for notifications)");
-  }
-  console.log(`  server: ${notifications.server || "https://ntfy.sh"}`);
-  if (notifications.callback_host) {
-    console.log(`  ✓ callback_host: ${notifications.callback_host}`);
-  } else {
-    console.log("  ⚠ callback_host: not set (interactive notifications disabled)");
   }
 
   // Validate defaults section
@@ -599,7 +442,6 @@ async function testSourceCommand(sourceName) {
     // Import poller
     const pollerPath = join(serviceDir, "poller.js");
     const { pollGenericSource, applyMappings } = await import(pollerPath);
-    const { getToolMappings } = await import(join(serviceDir, "repo-config.js"));
     
     // Fetch items with mappings applied
     const items = await pollGenericSource(source, { mappings });
@@ -763,7 +605,7 @@ async function testMappingCommand(mcpName) {
 
 async function main() {
   const args = process.argv.slice(2);
-  const { command, subcommand, flags } = parseArgs(args);
+  const { command, subcommand } = parseArgs(args);
 
   if (!command || command === "help") {
     showHelp();
@@ -773,10 +615,6 @@ async function main() {
   switch (command) {
     case "start":
       await startCommand();
-      break;
-
-    case "setup":
-      await setupCommand();
       break;
 
     case "status":

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# Tests for service/server.js - Standalone callback server as brew service
-# Issue #13: Separate callback server as brew service
+# Tests for service/server.js - Standalone polling server
 #
 
 set -euo pipefail
@@ -10,9 +9,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/test_helper.bash"
 
 SERVICE_DIR="$(dirname "$SCRIPT_DIR")/service"
-
-# Disable HTTPS redirect for tests (overrides any user config)
-export NTFY_CALLBACK_HTTPS=false
 
 echo "Testing service/server.js module..."
 echo ""
@@ -65,37 +61,9 @@ test_service_has_http_server() {
   }
 }
 
-test_service_has_unix_socket() {
-  grep -q "createServer\|net\|\.sock\|socket" "$SERVICE_DIR/server.js" || {
-    echo "Unix socket handling not found in server.js"
-    return 1
-  }
-}
-
 test_service_has_health_endpoint() {
   grep -q "/health" "$SERVICE_DIR/server.js" || {
     echo "/health endpoint not found in server.js"
-    return 1
-  }
-}
-
-test_service_has_callback_endpoint() {
-  grep -q "/callback" "$SERVICE_DIR/server.js" || {
-    echo "/callback endpoint not found in server.js"
-    return 1
-  }
-}
-
-test_service_handles_session_registration() {
-  grep -q "register\|session" "$SERVICE_DIR/server.js" || {
-    echo "Session registration not found in server.js"
-    return 1
-  }
-}
-
-test_service_handles_nonce_creation() {
-  grep -q "createNonce\|nonce" "$SERVICE_DIR/server.js" || {
-    echo "Nonce creation not found in server.js"
     return 1
   }
 }
@@ -107,7 +75,12 @@ test_service_logs_with_prefix() {
   }
 }
 
-
+test_service_imports_poll_service() {
+  grep -q "poll-service" "$SERVICE_DIR/server.js" || {
+    echo "poll-service import not found in server.js"
+    return 1
+  }
+}
 
 # =============================================================================
 # Functional Tests (requires Node.js)
@@ -123,10 +96,10 @@ test_service_starts_and_stops() {
   result=$(node --experimental-vm-modules -e "
     import { startService, stopService } from './service/server.js';
     
-    // Use random ports/sockets to avoid conflicts
+    // Use random port to avoid conflicts
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
+      enablePolling: false
     };
     
     const service = await startService(config);
@@ -161,7 +134,7 @@ test_service_health_endpoint_returns_200() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
+      enablePolling: false
     };
     
     const service = await startService(config);
@@ -187,7 +160,7 @@ test_service_health_endpoint_returns_200() {
   fi
 }
 
-test_service_returns_401_for_invalid_nonce() {
+test_service_returns_404_for_unknown_route() {
   if ! command -v node &>/dev/null; then
     echo "SKIP: node not available"
     return 0
@@ -199,857 +172,16 @@ test_service_returns_401_for_invalid_nonce() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
+      enablePolling: false
     };
     
     const service = await startService(config);
     const port = service.httpServer.address().port;
     
-    const res = await fetch('http://localhost:' + port + '/callback?nonce=invalid&response=once', {
-      method: 'POST'
-    });
+    const res = await fetch('http://localhost:' + port + '/nonexistent');
     
-    if (res.status !== 401) {
-      console.log('FAIL: Expected 401, got ' + res.status);
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-# =============================================================================
-# Mobile UI Tests
-# =============================================================================
-
-test_service_has_mobile_session_route() {
-  grep -q "/m/" "$SERVICE_DIR/server.js" || {
-    echo "Mobile session route /m/ not found in server.js"
-    return 1
-  }
-}
-
-test_service_has_api_session_route() {
-  grep -q "/api/" "$SERVICE_DIR/server.js" || {
-    echo "API proxy route /api/ not found in server.js"
-    return 1
-  }
-}
-
-test_service_mobile_page_returns_html() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123');
-    
-    if (res.status !== 200) {
-      console.log('FAIL: Mobile page returned ' + res.status);
-      process.exit(1);
-    }
-    
-    const contentType = res.headers.get('content-type');
-    if (!contentType || !contentType.includes('text/html')) {
-      console.log('FAIL: Expected text/html, got ' + contentType);
-      process.exit(1);
-    }
-    
-    const html = await res.text();
-    if (!html.includes('<!DOCTYPE html>')) {
-      console.log('FAIL: Response is not valid HTML');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_mobile_page_has_text_input() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123');
-    const html = await res.text();
-    
-    // Check for text input and send button
-    if (!html.includes('<textarea') && !html.includes('<input')) {
-      console.log('FAIL: No text input found in mobile page');
-      process.exit(1);
-    }
-    
-    if (!html.includes('Send') && !html.includes('send')) {
-      console.log('FAIL: No send button found in mobile page');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_api_session_proxies_get() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  # This test verifies the route exists and attempts to proxy GET requests
-  # We use a random high port that's unlikely to have a server running
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Use a random high port (59999) that's very unlikely to have a server
-    const res = await fetch('http://localhost:' + port + '/api/59999/session/ses_123');
-    
-    // We expect 502 Bad Gateway since there's no server on port 59999
-    // The important thing is the route exists and attempts to proxy (not 404)
-    if (res.status !== 502) {
-      console.log('FAIL: Expected 502 (proxy target unavailable), got ' + res.status);
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_api_chat_proxies_post() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Use a random high port (59999) that's very unlikely to have a server
-    const res = await fetch('http://localhost:' + port + '/api/59999/session/ses_123/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: 'test' })
-    });
-    
-    // We expect 502 Bad Gateway since there's no server on port 59999
-    if (res.status !== 502) {
-      console.log('FAIL: Expected 502 (proxy target unavailable), got ' + res.status);
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_api_agent_proxies_get() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Use a random high port (59999) that's very unlikely to have a server
-    const res = await fetch('http://localhost:' + port + '/api/59999/agent');
-    
-    // We expect 502 Bad Gateway since there's no server on port 59999
-    // The important thing is the route exists and attempts to proxy (not 404)
-    if (res.status !== 502) {
-      console.log('FAIL: Expected 502 (proxy target unavailable), got ' + res.status);
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_api_provider_proxies_get() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Use a random high port (59999) that's very unlikely to have a server
-    const res = await fetch('http://localhost:' + port + '/api/59999/provider');
-    
-    // We expect 502 Bad Gateway since there's no server on port 59999
-    // The important thing is the route exists and attempts to proxy (not 404)
-    if (res.status !== 502) {
-      console.log('FAIL: Expected 502 (proxy target unavailable), got ' + res.status);
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_mobile_ui_fetches_messages_endpoint() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123');
-    const html = await res.text();
-    
-    // The mobile UI JavaScript should fetch from /message endpoint, not expect messages in session
-    // This is critical: messages are at /session/:id/message, not embedded in /session/:id
-    if (!html.includes('/message')) {
-      console.log('FAIL: Mobile UI should fetch from /message endpoint');
-      process.exit(1);
-    }
-    
-    // Should NOT rely on session.messages (which doesn't exist in OpenCode API)
-    // The loadSession function should fetch messages separately
-    if (html.includes('session.messages')) {
-      console.log('FAIL: Mobile UI should not use session.messages (it does not exist in API)');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_mobile_ui_parses_message_info_role() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123');
-    const html = await res.text();
-    
-    // The mobile UI should look for role in message.info.role (OpenCode structure)
-    // not message.role (which doesn't exist at top level)
-    if (!html.includes('.info.role') && !html.includes('info\"].role')) {
-      console.log('FAIL: Mobile UI should access role via message.info.role');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_mobile_ui_fetches_session_title() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
-      headers: { 'X-Forwarded-Proto': 'https' }
-    });
-    const html = await res.text();
-    
-    // The mobile UI should fetch session info to get the autogenerated title
-    // This requires fetching from /session/:id endpoint and displaying the title
-    if (!html.includes('loadSessionInfo') || !html.includes('sessionTitle')) {
-      console.log('FAIL: Mobile UI should fetch and display session title');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_mobile_ui_shows_conversation_history() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
-      headers: { 'X-Forwarded-Proto': 'https' }
-    });
-    const html = await res.text();
-    
-    // The mobile UI should display multiple messages from conversation history
-    // Look for a container that shows all messages and the renderMessages function
-    if (!html.includes('renderMessages') || !html.includes('messages-list')) {
-      console.log('FAIL: Mobile UI should have renderMessages function AND messages-list container for conversation history');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_mobile_page_has_agent_selector() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
-      headers: { 'X-Forwarded-Proto': 'https' }
-    });
-    const html = await res.text();
-    
-    // Should have agent selector (select element with id='agent')
-    if (!html.includes('id=\"agent\"') && !html.includes(\"id='agent'\")) {
-      console.log('FAIL: No agent selector found in mobile session page');
-      process.exit(1);
-    }
-    
-    // Should load agents from API
-    if (!html.includes('/agent')) {
-      console.log('FAIL: Mobile page should fetch agents from API');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_mobile_page_has_model_selector() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
-      headers: { 'X-Forwarded-Proto': 'https' }
-    });
-    const html = await res.text();
-    
-    // Should have model selector (select element with id='model')
-    if (!html.includes('id=\"model\"') && !html.includes(\"id='model'\")) {
-      console.log('FAIL: No model selector found in mobile session page');
-      process.exit(1);
-    }
-    
-    // Should load models/providers from API or favorites
-    if (!html.includes('/provider') && !html.includes('/favorites')) {
-      console.log('FAIL: Mobile page should fetch models from API or favorites');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_mobile_page_sends_agent_with_message() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
-      headers: { 'X-Forwarded-Proto': 'https' }
-    });
-    const html = await res.text();
-    
-    // The sendMessage function should include agent in the request body
-    // Look for 'agent:' or 'agent :' in the message body construction
-    if (!html.includes('agent:') && !html.includes('agent :')) {
-      console.log('FAIL: sendMessage should include agent in request body');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_mobile_page_sends_model_with_message() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
-      headers: { 'X-Forwarded-Proto': 'https' }
-    });
-    const html = await res.text();
-    
-    // The sendMessage function should include model in the request body when selected
-    // Look for model config construction (providerID/modelID)
-    if (!html.includes('providerID') || !html.includes('modelID')) {
-      console.log('FAIL: sendMessage should support model selection with providerID/modelID');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-# =============================================================================
-# Security Tests
-# =============================================================================
-
-test_service_rejects_privileged_ports() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Try to proxy to port 22 (SSH) - should be rejected
-    const res = await fetch('http://localhost:' + port + '/api/22/session/ses_123');
-    
-    // Expect 400 Bad Request for invalid port, not 502 (which would mean it tried to connect)
-    if (res.status !== 400) {
-      console.log('FAIL: Expected 400 for privileged port, got ' + res.status);
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_rejects_low_ports() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Try to proxy to port 80 (HTTP) - should be rejected as it's below 1024
-    const res = await fetch('http://localhost:' + port + '/api/80/session/ses_123');
-    
-    if (res.status !== 400) {
-      console.log('FAIL: Expected 400 for low port, got ' + res.status);
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_escapes_html_in_reponame() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Try XSS via repo name
-    const xssPayload = encodeURIComponent('<script>alert(1)</script>');
-    const res = await fetch('http://localhost:' + port + '/m/4096/' + xssPayload + '/session/ses_123');
-    const html = await res.text();
-    
-    // The script tag should be escaped, not raw
-    if (html.includes('<script>alert(1)</script>')) {
-      console.log('FAIL: XSS payload was not escaped in HTML');
-      process.exit(1);
-    }
-    
-    // Should contain escaped version
-    if (!html.includes('&lt;script&gt;') && !html.includes('\\\\u003c')) {
-      console.log('FAIL: Expected escaped script tag');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_markdown_renderer_escapes_xss() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123');
-    const html = await res.text();
-    
-    // Extract the renderMarkdown function and test it
-    // The function should escape HTML before applying markdown
-    // We verify by checking the escapeHtml is called before regex replacements
-    
-    // Check that escapeHtml is defined and called first in renderMarkdown
-    if (!html.includes('function escapeHtml')) {
-      console.log('FAIL: escapeHtml function not found');
-      process.exit(1);
-    }
-    
-    if (!html.includes('function renderMarkdown')) {
-      console.log('FAIL: renderMarkdown function not found');
-      process.exit(1);
-    }
-    
-    // Verify escapeHtml is called at the start of renderMarkdown
-    // The pattern should be: escapeHtml(text) before any .replace() calls
-    const renderMarkdownMatch = html.match(/function renderMarkdown[\\s\\S]*?escapeHtml\\(text\\)/);
-    if (!renderMarkdownMatch) {
-      console.log('FAIL: renderMarkdown should call escapeHtml(text) before processing');
-      process.exit(1);
-    }
-    
-    // Verify the escapeHtml function uses safe DOM-based escaping
-    if (!html.includes('textContent') || !html.includes('innerHTML')) {
-      console.log('FAIL: escapeHtml should use DOM-based escaping (textContent -> innerHTML)');
+    if (res.status !== 404) {
+      console.log('FAIL: Expected 404, got ' + res.status);
       process.exit(1);
     }
     
@@ -1078,14 +210,14 @@ test_service_handles_cors_preflight() {
     
     const config = {
       httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
+      enablePolling: false
     };
     
     const service = await startService(config);
     const port = service.httpServer.address().port;
     
     // Send OPTIONS preflight request
-    const res = await fetch('http://localhost:' + port + '/api/4096/session/ses_123', {
+    const res = await fetch('http://localhost:' + port + '/health', {
       method: 'OPTIONS'
     });
     
@@ -1097,143 +229,6 @@ test_service_handles_cors_preflight() {
     const allowOrigin = res.headers.get('access-control-allow-origin');
     if (allowOrigin !== '*') {
       console.log('FAIL: Expected Access-Control-Allow-Origin: *, got ' + allowOrigin);
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_mobile_ui_uses_dynamic_viewport_units() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
-      headers: { 'X-Forwarded-Proto': 'https' }
-    });
-    const html = await res.text();
-    
-    // Issue #40: Mobile UI should use dvh (dynamic viewport height) units
-    // instead of vh to handle mobile keyboard viewport changes
-    if (!html.includes('dvh') && !html.includes('100svh')) {
-      console.log('FAIL: Mobile UI should use dynamic viewport units (dvh/svh) for proper mobile keyboard handling');
-      process.exit(1);
-    }
-    
-    // Should not use 100vh for min-height as it doesn't account for keyboard
-    if (html.includes('min-height: 100vh')) {
-      console.log('FAIL: Mobile UI should not use 100vh for min-height (use dvh instead)');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_mobile_ui_has_viewport_resize_handler() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Include X-Forwarded-Proto header to bypass HTTPS redirect in test
-    const res = await fetch('http://localhost:' + port + '/m/4096/myrepo/session/ses_123', {
-      headers: { 'X-Forwarded-Proto': 'https' }
-    });
-    const html = await res.text();
-    
-    // Issue #40: Mobile UI should use visualViewport API to handle keyboard resize
-    if (!html.includes('visualViewport')) {
-      console.log('FAIL: Mobile UI should use visualViewport API for keyboard handling');
-      process.exit(1);
-    }
-    
-    await stopService(service);
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_service_rejects_large_request_body() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { startService, stopService } from './service/server.js';
-    
-    const config = {
-      httpPort: 0,
-      socketPath: '/tmp/opencode-pilot-test-' + process.pid + '.sock'
-    };
-    
-    const service = await startService(config);
-    const port = service.httpServer.address().port;
-    
-    // Send a 2MB body (should be rejected if limit is 1MB)
-    const largeBody = 'x'.repeat(2 * 1024 * 1024);
-    const res = await fetch('http://localhost:' + port + '/api/4096/session/ses_123/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: largeBody })
-    });
-    
-    if (res.status !== 413) {
-      console.log('FAIL: Expected 413 for large body, got ' + res.status);
       process.exit(1);
     }
     
@@ -1278,12 +273,9 @@ echo "Implementation Tests:"
 
 for test_func in \
   test_service_has_http_server \
-  test_service_has_unix_socket \
   test_service_has_health_endpoint \
-  test_service_has_callback_endpoint \
-  test_service_handles_session_registration \
-  test_service_handles_nonce_creation \
-  test_service_logs_with_prefix
+  test_service_logs_with_prefix \
+  test_service_imports_poll_service
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -1294,47 +286,8 @@ echo "Functional Tests:"
 for test_func in \
   test_service_starts_and_stops \
   test_service_health_endpoint_returns_200 \
-  test_service_returns_401_for_invalid_nonce
-do
-  run_test "${test_func#test_}" "$test_func"
-done
-
-echo ""
-echo "Mobile UI Tests:"
-
-for test_func in \
-  test_service_has_mobile_session_route \
-  test_service_has_api_session_route \
-  test_service_mobile_page_returns_html \
-  test_service_mobile_page_has_text_input \
-  test_service_api_session_proxies_get \
-  test_service_api_chat_proxies_post \
-  test_service_api_agent_proxies_get \
-  test_service_api_provider_proxies_get \
-  test_service_mobile_ui_fetches_messages_endpoint \
-  test_service_mobile_ui_parses_message_info_role \
-  test_service_mobile_ui_fetches_session_title \
-  test_service_mobile_ui_shows_conversation_history \
-  test_service_mobile_ui_uses_dynamic_viewport_units \
-  test_service_mobile_ui_has_viewport_resize_handler \
-  test_service_mobile_page_has_agent_selector \
-  test_service_mobile_page_has_model_selector \
-  test_service_mobile_page_sends_agent_with_message \
-  test_service_mobile_page_sends_model_with_message
-do
-  run_test "${test_func#test_}" "$test_func"
-done
-
-echo ""
-echo "Security Tests:"
-
-for test_func in \
-  test_service_rejects_privileged_ports \
-  test_service_rejects_low_ports \
-  test_service_escapes_html_in_reponame \
-  test_service_markdown_renderer_escapes_xss \
-  test_service_handles_cors_preflight \
-  test_service_rejects_large_request_body
+  test_service_returns_404_for_unknown_route \
+  test_service_handles_cors_preflight
 do
   run_test "${test_func#test_}" "$test_func"
 done

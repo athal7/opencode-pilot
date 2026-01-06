@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>io.opencode.ntfy</string>
+    <string>io.opencode.pilot</string>
     
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/node</string>
-        <string>/usr/local/opt/opencode-ntfy/libexec/server.js</string>
+        <string>/usr/local/opt/opencode-pilot/libexec/server.js</string>
     </array>
     
     <key>RunAtLoad</key>
@@ -18,12 +18,12 @@
     <true/>
     
     <key>StandardOutPath</key>
-    <string>/usr/local/var/log/opencode-ntfy.log</string>
+    <string>/usr/local/var/log/opencode-pilot.log</string>
     
     <key>StandardErrorPath</key>
-    <string>/usr/local/var/log/opencode-ntfy.log</string>
+    <string>/usr/local/var/log/opencode-pilot.log</string>
     
     <key>WorkingDirectory</key>
-    <string>/usr/local/opt/opencode-ntfy/libexec</string>
+    <string>/usr/local/opt/opencode-pilot/libexec</string>
 </dict>
 </plist>

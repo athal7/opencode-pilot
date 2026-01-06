@@ -68,23 +68,16 @@ test_repo_config_supports_yaml() {
   }
 }
 
-test_repo_config_supports_prefix_matching() {
-  grep -q "prefix\|endsWith.*/" "$SERVICE_DIR/repo-config.js" || {
-    echo "Prefix matching not found"
+test_repo_config_supports_source_config() {
+  grep -q "sources" "$SERVICE_DIR/repo-config.js" || {
+    echo "Sources support not found"
     return 1
   }
 }
 
-test_repo_config_merges_configs() {
-  grep -q "merge\|deep.*merge" "$SERVICE_DIR/repo-config.js" || {
-    echo "Config merging not found"
-    return 1
-  }
-}
-
-test_repo_config_expands_placeholders() {
-  grep -q "{repo}\|placeholder" "$SERVICE_DIR/repo-config.js" || {
-    echo "Placeholder expansion not found"
+test_repo_config_supports_tool_mappings() {
+  grep -q "mappings\|tools" "$SERVICE_DIR/repo-config.js" || {
+    echo "Tool mappings support not found"
     return 1
   }
 }
@@ -93,7 +86,7 @@ test_repo_config_expands_placeholders() {
 # Functional Tests
 # =============================================================================
 
-test_repo_config_defaults() {
+test_repo_config_returns_empty_for_unknown_repo() {
   if ! command -v node &>/dev/null; then
     echo "SKIP: node not available"
     return 0
@@ -103,15 +96,11 @@ test_repo_config_defaults() {
   result=$(node --experimental-vm-modules -e "
     import { getRepoConfig } from './service/repo-config.js';
     
-    // Get config for non-existent repo should return defaults
+    // Get config for non-existent repo should return empty object
     const config = getRepoConfig('nonexistent/repo');
     
-    if (!config.readiness) {
-      console.log('FAIL: Missing readiness in defaults');
-      process.exit(1);
-    }
-    if (!config.readiness.labels) {
-      console.log('FAIL: Missing readiness.labels in defaults');
+    if (typeof config !== 'object') {
+      console.log('FAIL: Expected object for unknown repo');
       process.exit(1);
     }
     console.log('PASS');
@@ -126,7 +115,7 @@ test_repo_config_defaults() {
   fi
 }
 
-test_repo_config_prefix_matching() {
+test_repo_config_gets_sources() {
   if ! command -v node &>/dev/null; then
     echo "SKIP: node not available"
     return 0
@@ -134,206 +123,15 @@ test_repo_config_prefix_matching() {
   
   local result
   result=$(node --experimental-vm-modules -e "
-    import { loadRepoConfig, getRepoConfig } from './service/repo-config.js';
+    import { getAllSources } from './service/repo-config.js';
     
-    // Load test config
-    const testConfig = {
-      repos: {
-        'myorg/': {
-          repo_path: '~/code/{repo}',
-          readiness: { labels: { any_of: ['ready'] } }
-        },
-        'myorg/backend': {
-          readiness: { labels: { any_of: ['backend-ready'] } }
-        }
-      }
-    };
-    
-    loadRepoConfig(testConfig);
-    
-    // Get config for myorg/backend - should merge prefix + exact
-    const config = getRepoConfig('myorg/backend');
-    
-    // Should have readiness from exact match
-    if (!config.readiness.labels.any_of.includes('backend-ready')) {
-      console.log('FAIL: Expected any_of to include backend-ready from exact match');
-      process.exit(1);
-    }
-    
-    // Get config for myorg/frontend - should get prefix config
-    const frontendConfig = getRepoConfig('myorg/frontend');
-    if (!frontendConfig.readiness.labels.any_of.includes('ready')) {
-      console.log('FAIL: Expected any_of to include ready from prefix');
-      process.exit(1);
-    }
-    
-    // repo_path should have {repo} expanded
-    if (frontendConfig.repo_path !== '~/code/frontend') {
-      console.log('FAIL: Expected expanded repo_path, got ' + frontendConfig.repo_path);
-      process.exit(1);
-    }
-    
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-# =============================================================================
-# Default Sources Tests
-# =============================================================================
-
-test_repo_config_default_sources() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { loadRepoConfig, getRepoConfig, getAllSources } from './service/repo-config.js';
-    
-    // Load config with repo that has no sources specified
-    const testConfig = {
-      repos: {
-        'myorg/': {
-          repo_path: '~/code/{repo}'
-        },
-        'myorg/backend': {}  // No sources specified
-      }
-    };
-    
-    loadRepoConfig(testConfig);
-    
-    // Get config - should have default github_issue source
-    const config = getRepoConfig('myorg/backend');
-    
-    if (!config.sources || config.sources.length === 0) {
-      console.log('FAIL: Expected default sources, got empty array');
-      process.exit(1);
-    }
-    
-    const defaultSource = config.sources[0];
-    if (defaultSource.type !== 'github_issue') {
-      console.log('FAIL: Expected default source type github_issue, got ' + defaultSource.type);
-      process.exit(1);
-    }
-    
-    if (!defaultSource.fetch || defaultSource.fetch.assignee !== '@me') {
-      console.log('FAIL: Expected default fetch.assignee=@me, got ' + JSON.stringify(defaultSource.fetch));
-      process.exit(1);
-    }
-    
-    if (!defaultSource.fetch || defaultSource.fetch.state !== 'open') {
-      console.log('FAIL: Expected default fetch.state=open, got ' + JSON.stringify(defaultSource.fetch));
-      process.exit(1);
-    }
-    
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_repo_config_explicit_sources_override_defaults() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { loadRepoConfig, getRepoConfig } from './service/repo-config.js';
-    
-    // Load config with explicit sources
-    const testConfig = {
-      repos: {
-        'myorg/backend': {
-          sources: [
-            { type: 'github_pr', fetch: { state: 'open' } }
-          ]
-        }
-      }
-    };
-    
-    loadRepoConfig(testConfig);
-    
-    // Get config - should have explicit sources, not defaults
-    const config = getRepoConfig('myorg/backend');
-    
-    if (config.sources.length !== 1) {
-      console.log('FAIL: Expected 1 source, got ' + config.sources.length);
-      process.exit(1);
-    }
-    
-    if (config.sources[0].type !== 'github_pr') {
-      console.log('FAIL: Expected explicit github_pr source, got ' + config.sources[0].type);
-      process.exit(1);
-    }
-    
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_repo_config_get_all_sources_includes_defaults() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { loadRepoConfig, getAllSources } from './service/repo-config.js';
-    
-    // Load config with repo that has no sources specified
-    const testConfig = {
-      repos: {
-        'myorg/backend': {
-          repo_path: '~/code/backend'
-        }
-      }
-    };
-    
-    loadRepoConfig(testConfig);
-    
-    // getAllSources should include the default source
+    // getAllSources should return an array
     const sources = getAllSources();
     
-    if (sources.length !== 1) {
-      console.log('FAIL: Expected 1 source from getAllSources, got ' + sources.length);
+    if (!Array.isArray(sources)) {
+      console.log('FAIL: Expected array from getAllSources');
       process.exit(1);
     }
-    
-    if (sources[0].type !== 'github_issue') {
-      console.log('FAIL: Expected github_issue source, got ' + sources[0].type);
-      process.exit(1);
-    }
-    
-    if (sources[0].repo_key !== 'myorg/backend') {
-      console.log('FAIL: Expected repo_key myorg/backend, got ' + sources[0].repo_key);
-      process.exit(1);
-    }
-    
     console.log('PASS');
   " 2>&1) || {
     echo "Functional test failed: $result"
@@ -375,9 +173,8 @@ echo "Implementation Tests:"
 
 for test_func in \
   test_repo_config_supports_yaml \
-  test_repo_config_supports_prefix_matching \
-  test_repo_config_merges_configs \
-  test_repo_config_expands_placeholders
+  test_repo_config_supports_source_config \
+  test_repo_config_supports_tool_mappings
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -386,19 +183,8 @@ echo ""
 echo "Functional Tests:"
 
 for test_func in \
-  test_repo_config_defaults \
-  test_repo_config_prefix_matching
-do
-  run_test "${test_func#test_}" "$test_func"
-done
-
-echo ""
-echo "Default Sources Tests:"
-
-for test_func in \
-  test_repo_config_default_sources \
-  test_repo_config_explicit_sources_override_defaults \
-  test_repo_config_get_all_sources_includes_defaults
+  test_repo_config_returns_empty_for_unknown_repo \
+  test_repo_config_gets_sources
 do
   run_test "${test_func#test_}" "$test_func"
 done

@@ -7,7 +7,6 @@ Before committing changes, verify documentation is updated to reflect code chang
 1. **README.md** - Update if changes affect:
    - Configuration options (config.yaml keys)
    - CLI commands (`opencode-pilot <command>`)
-   - Notification types or behavior
    - Installation or setup steps
    - Service management
    - Sources or polling behavior
@@ -15,7 +14,6 @@ Before committing changes, verify documentation is updated to reflect code chang
 2. **CONTRIBUTING.md** - Update if changes affect:
    - Development setup or workflow
    - Test commands or patterns
-   - Plugin architecture
 
 ## Post-PR: Release and Upgrade Workflow
 
@@ -38,20 +36,16 @@ gh release list -R athal7/opencode-pilot -L 1
 npm view opencode-pilot version
 ```
 
-### 3. Restart OpenCode
+### 3. Restart Service
 
-OpenCode auto-updates npm plugins. Simply restart any running OpenCode sessions to get the latest version.
-
-### 4. Restart Service
-
-If the callback service is running, restart it:
+If the service is running, restart it:
 
 ```bash
 # Stop current service (Ctrl+C) and restart
 npx opencode-pilot start
 ```
 
-### 5. Verify Upgrade
+### 4. Verify Upgrade
 
 ```bash
 npx opencode-pilot status
@@ -61,10 +55,10 @@ npx opencode-pilot status
 
 Config file: `~/.config/opencode-pilot/config.yaml`
 
-Configuration has three sections:
-- `notifications` - ntfy settings (topic, server, callback, etc.)
-- `repos` - per-repository settings (use YAML anchors to share config)
+Configuration has these sections:
+- `tools` - field mappings for MCP servers
 - `sources` - polling sources with generic MCP tool references
+- `repos` - per-repository settings (use YAML anchors to share config)
 
 Template files: `~/.config/opencode-pilot/templates/*.md`
 

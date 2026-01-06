@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# Tests for service/io.opencode.ntfy.plist - LaunchAgent plist for brew services
-# Issue #13: Separate callback server as brew service
+# Tests for service/io.opencode.pilot.plist - LaunchAgent plist for brew services
 #
 
 set -euo pipefail
@@ -19,7 +18,7 @@ echo ""
 # =============================================================================
 
 test_plist_file_exists() {
-  assert_file_exists "$SERVICE_DIR/io.opencode.ntfy.plist"
+  assert_file_exists "$SERVICE_DIR/io.opencode.pilot.plist"
 }
 
 test_plist_is_valid_xml() {
@@ -27,7 +26,7 @@ test_plist_is_valid_xml() {
     echo "SKIP: plutil not available (macOS only)"
     return 0
   fi
-  plutil -lint "$SERVICE_DIR/io.opencode.ntfy.plist" 2>&1 || {
+  plutil -lint "$SERVICE_DIR/io.opencode.pilot.plist" 2>&1 || {
     echo "plist is not valid XML"
     return 1
   }
@@ -38,56 +37,56 @@ test_plist_is_valid_xml() {
 # =============================================================================
 
 test_plist_has_label() {
-  grep -q "<string>io.opencode.ntfy</string>" "$SERVICE_DIR/io.opencode.ntfy.plist" || {
+  grep -q "<string>io.opencode.pilot</string>" "$SERVICE_DIR/io.opencode.pilot.plist" || {
     echo "Label not found in plist"
     return 1
   }
 }
 
 test_plist_has_program_arguments() {
-  grep -q "<key>ProgramArguments</key>" "$SERVICE_DIR/io.opencode.ntfy.plist" || {
+  grep -q "<key>ProgramArguments</key>" "$SERVICE_DIR/io.opencode.pilot.plist" || {
     echo "ProgramArguments not found in plist"
     return 1
   }
 }
 
 test_plist_runs_node() {
-  grep -q "node" "$SERVICE_DIR/io.opencode.ntfy.plist" || {
+  grep -q "node" "$SERVICE_DIR/io.opencode.pilot.plist" || {
     echo "node command not found in plist"
     return 1
   }
 }
 
 test_plist_runs_server_js() {
-  grep -q "server.js" "$SERVICE_DIR/io.opencode.ntfy.plist" || {
+  grep -q "server.js" "$SERVICE_DIR/io.opencode.pilot.plist" || {
     echo "server.js not found in plist"
     return 1
   }
 }
 
 test_plist_has_keep_alive() {
-  grep -q "<key>KeepAlive</key>" "$SERVICE_DIR/io.opencode.ntfy.plist" || {
+  grep -q "<key>KeepAlive</key>" "$SERVICE_DIR/io.opencode.pilot.plist" || {
     echo "KeepAlive not found in plist"
     return 1
   }
 }
 
 test_plist_has_run_at_load() {
-  grep -q "<key>RunAtLoad</key>" "$SERVICE_DIR/io.opencode.ntfy.plist" || {
+  grep -q "<key>RunAtLoad</key>" "$SERVICE_DIR/io.opencode.pilot.plist" || {
     echo "RunAtLoad not found in plist"
     return 1
   }
 }
 
 test_plist_has_stdout_log() {
-  grep -q "stdout\|StandardOutPath" "$SERVICE_DIR/io.opencode.ntfy.plist" || {
+  grep -q "stdout\|StandardOutPath" "$SERVICE_DIR/io.opencode.pilot.plist" || {
     echo "Stdout logging not found in plist"
     return 1
   }
 }
 
 test_plist_has_stderr_log() {
-  grep -q "stderr\|StandardErrorPath" "$SERVICE_DIR/io.opencode.ntfy.plist" || {
+  grep -q "stderr\|StandardErrorPath" "$SERVICE_DIR/io.opencode.pilot.plist" || {
     echo "Stderr logging not found in plist"
     return 1
   }

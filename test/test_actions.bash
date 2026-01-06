@@ -62,7 +62,7 @@ test_actions_uses_opencode_run() {
 }
 
 test_actions_prompt_template() {
-  grep -q "prompt_template\|promptTemplate" "$SERVICE_DIR/actions.js" || {
+  grep -q "prompt_template\|promptTemplate\|buildPromptFromTemplate" "$SERVICE_DIR/actions.js" || {
     echo "Prompt template support not found"
     return 1
   }
@@ -104,7 +104,7 @@ test_actions_build_local_command() {
     
     const config = {
       repo_path: '~/code/myrepo',
-      session: { name_template: 'issue-{number}' }
+      session: { name: 'issue-{number}' }
     };
     
     const cmd = buildCommand(item, config);
@@ -116,55 +116,6 @@ test_actions_build_local_command() {
     // Check for cwd pattern (cd ~/code/myrepo && ...)
     if (!cmd.includes('cd') || !cmd.includes('myrepo')) {
       console.log('FAIL: Command should include cd to repo path, got: ' + cmd);
-      process.exit(1);
-    }
-    console.log('PASS');
-  " 2>&1) || {
-    echo "Functional test failed: $result"
-    return 1
-  }
-  
-  if ! echo "$result" | grep -q "PASS"; then
-    echo "$result"
-    return 1
-  fi
-}
-
-test_actions_prompt_template_expansion() {
-  if ! command -v node &>/dev/null; then
-    echo "SKIP: node not available"
-    return 0
-  fi
-  
-  local result
-  result=$(node --experimental-vm-modules -e "
-    import { buildCommand } from './service/actions.js';
-    
-    const item = {
-      title: 'Fix bug',
-      body: 'Details here',
-      number: 456
-    };
-    
-    // Config with custom prompt template (e.g., for devcontainer)
-    const config = {
-      repo_path: '~/code/myrepo',
-      session: { 
-        name_template: 'issue-{number}',
-        prompt_template: '/devcontainer issue-{number}\n\n{title}\n\n{body}'
-      }
-    };
-    
-    const cmd = buildCommand(item, config);
-    
-    // Should include the expanded template
-    if (!cmd.includes('/devcontainer issue-456')) {
-      console.log('FAIL: Command should include expanded prompt template');
-      console.log('Got: ' + cmd);
-      process.exit(1);
-    }
-    if (!cmd.includes('Fix bug')) {
-      console.log('FAIL: Command should include title from template');
       process.exit(1);
     }
     console.log('PASS');
@@ -200,6 +151,40 @@ test_actions_session_name_template() {
     
     if (name !== 'issue-backend-42') {
       console.log('FAIL: Expected issue-backend-42, got ' + name);
+      process.exit(1);
+    }
+    console.log('PASS');
+  " 2>&1) || {
+    echo "Functional test failed: $result"
+    return 1
+  }
+  
+  if ! echo "$result" | grep -q "PASS"; then
+    echo "$result"
+    return 1
+  fi
+}
+
+test_actions_expand_template() {
+  if ! command -v node &>/dev/null; then
+    echo "SKIP: node not available"
+    return 0
+  fi
+  
+  local result
+  result=$(node --experimental-vm-modules -e "
+    import { expandTemplate } from './service/actions.js';
+    
+    const item = {
+      title: 'Fix bug',
+      number: 456
+    };
+    
+    const template = 'Issue #{number}: {title}';
+    const expanded = expandTemplate(template, item);
+    
+    if (expanded !== 'Issue #456: Fix bug') {
+      console.log('FAIL: Expected \"Issue #456: Fix bug\", got \"' + expanded + '\"');
       process.exit(1);
     }
     console.log('PASS');
@@ -254,8 +239,8 @@ echo "Functional Tests:"
 
 for test_func in \
   test_actions_build_local_command \
-  test_actions_prompt_template_expansion \
-  test_actions_session_name_template
+  test_actions_session_name_template \
+  test_actions_expand_template
 do
   run_test "${test_func#test_}" "$test_func"
 done

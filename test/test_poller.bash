@@ -43,9 +43,16 @@ test_poller_exports_create_poller() {
   }
 }
 
-test_poller_exports_poll_source() {
-  grep -q "export.*function pollSource\|export.*pollSource" "$SERVICE_DIR/poller.js" || {
-    echo "pollSource export not found in poller.js"
+test_poller_exports_poll_generic_source() {
+  grep -q "export.*function pollGenericSource\|export.*pollGenericSource" "$SERVICE_DIR/poller.js" || {
+    echo "pollGenericSource export not found in poller.js"
+    return 1
+  }
+}
+
+test_poller_exports_apply_mappings() {
+  grep -q "export.*function applyMappings\|export.*applyMappings" "$SERVICE_DIR/poller.js" || {
+    echo "applyMappings export not found in poller.js"
     return 1
   }
 }
@@ -53,20 +60,6 @@ test_poller_exports_poll_source() {
 # =============================================================================
 # Implementation Tests
 # =============================================================================
-
-test_poller_supports_github_issues() {
-  grep -q "github_issue\|github-issue" "$SERVICE_DIR/poller.js" || {
-    echo "GitHub issue source type not found in poller.js"
-    return 1
-  }
-}
-
-test_poller_supports_linear_issues() {
-  grep -q "linear_issue\|linear-issue" "$SERVICE_DIR/poller.js" || {
-    echo "Linear issue source type not found in poller.js"
-    return 1
-  }
-}
 
 test_poller_uses_mcp_client() {
   grep -q "@modelcontextprotocol/sdk" "$SERVICE_DIR/poller.js" || {
@@ -78,6 +71,13 @@ test_poller_uses_mcp_client() {
 test_poller_tracks_processed_items() {
   grep -q "processed\|state\|seen" "$SERVICE_DIR/poller.js" || {
     echo "Processed items tracking not found in poller.js"
+    return 1
+  }
+}
+
+test_poller_supports_generic_tools() {
+  grep -q "tool" "$SERVICE_DIR/poller.js" || {
+    echo "Tool-based polling not found in poller.js"
     return 1
   }
 }
@@ -100,7 +100,8 @@ echo "Export Tests:"
 
 for test_func in \
   test_poller_exports_create_poller \
-  test_poller_exports_poll_source
+  test_poller_exports_poll_generic_source \
+  test_poller_exports_apply_mappings
 do
   run_test "${test_func#test_}" "$test_func"
 done
@@ -109,10 +110,9 @@ echo ""
 echo "Implementation Tests:"
 
 for test_func in \
-  test_poller_supports_github_issues \
-  test_poller_supports_linear_issues \
   test_poller_uses_mcp_client \
-  test_poller_tracks_processed_items
+  test_poller_tracks_processed_items \
+  test_poller_supports_generic_tools
 do
   run_test "${test_func#test_}" "$test_func"
 done
