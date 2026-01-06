@@ -24,7 +24,7 @@ tools:
 # SOURCES - What to poll (generic MCP tool references)
 # =============================================================================
 sources:
-  # GitHub issues assigned to me - work in devcontainer
+  # GitHub issues assigned to me
   - name: my-issues
     tool:
       mcp: github
@@ -33,7 +33,7 @@ sources:
       q: "is:issue assignee:@me state:open"
     item:
       id: "{html_url}"
-    prompt: devcontainer
+    prompt: worktree
     agent: plan
 
   # GitHub PRs needing review
@@ -48,7 +48,7 @@ sources:
     prompt: review
     agent: plan
 
-  # Linear issues - work in devcontainer
+  # Linear issues
   # NOTE: Replace teamId and assigneeId with your actual Linear UUIDs
   # Find these via: linear_list_teams and check user IDs in team members
   - name: linear-work
@@ -62,5 +62,5 @@ sources:
     item:
       id: "linear:{id}"
     working_dir: ~/code/myproject
-    prompt: devcontainer
+    prompt: worktree
     agent: plan
