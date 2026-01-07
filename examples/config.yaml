@@ -77,6 +77,7 @@ sources:
 # Each tool provider can specify:
 #   response_key: Key to extract array from response (e.g., "reminders")
 #   mappings: Field name translations (e.g., { body: "notes" })
+#   reprocess_on: Fields that trigger reprocessing (state/status changes)
 # =============================================================================
 # tools:
 #   apple-reminders:
@@ -84,6 +85,11 @@ sources:
 #     mappings:
 #       title: name
 #       body: notes
+#     # Apple Reminders doesn't have a state field like GitHub/Linear.
+#     # Reminders are either in the list (incomplete) or not (completed/deleted).
+#     # Source-aware cleanup handles completed reminders automatically -
+#     # they won't appear in the poll results and their state entries expire.
+#     # No reprocess_on needed for typical reminder workflows.
 
 # =============================================================================
 # REPOS - Map GitHub repos to local paths (OPTIONAL)
