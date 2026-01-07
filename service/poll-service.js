@@ -9,7 +9,7 @@
  * 5. Track processed items to avoid duplicates
  */
 
-import { loadRepoConfig, getRepoConfig, getAllSources, getToolProviderConfig, resolveRepoForItem } from "./repo-config.js";
+import { loadRepoConfig, getRepoConfig, getAllSources, getToolProviderConfig, resolveRepoForItem, getCleanupTtlDays } from "./repo-config.js";
 import { createPoller, pollGenericSource } from "./poller.js";
 import { evaluateReadiness, sortByPriority } from "./readiness.js";
 import { executeAction, buildCommand } from "./actions.js";
@@ -185,7 +185,11 @@ export async function pollOnce(options = {}) {
           if (result.success) {
             // Mark as processed to avoid re-triggering
             if (pollerInstance) {
-              pollerInstance.markProcessed(item.id, { repoKey: item.repo_key, command: result.command });
+              pollerInstance.markProcessed(item.id, { 
+                repoKey: item.repo_key, 
+                command: result.command,
+                source: sourceName,
+              });
             }
             console.log(`[poll] Started session for ${item.id}`);
           } else {
@@ -198,6 +202,16 @@ export async function pollOnce(options = {}) {
             error: err.message,
           });
         }
+      }
+    }
+
+    // Clean up state entries for items no longer returned by this source
+    // Only removes entries older than 1 day to avoid race conditions with API issues
+    if (pollerInstance && items.length > 0) {
+      const currentItemIds = items.map(item => item.id);
+      const removed = pollerInstance.cleanupMissingFromSource(sourceName, currentItemIds, 1);
+      if (removed > 0) {
+        debug(`Cleaned up ${removed} stale state entries for source ${sourceName}`);
       }
     }
   }
@@ -215,8 +229,18 @@ export async function pollOnce(options = {}) {
 export function startPolling(options = {}) {
   const { interval = DEFAULT_POLL_INTERVAL, configPath } = options;
 
+  // Load config to access cleanup settings
+  loadRepoConfig(configPath);
+
   // Initialize poller for state tracking
   pollerInstance = createPoller({ configPath });
+
+  // Clean up expired entries on startup
+  const ttlDays = getCleanupTtlDays();
+  const expiredRemoved = pollerInstance.cleanupExpired(ttlDays);
+  if (expiredRemoved > 0) {
+    console.log(`[poll] Cleaned up ${expiredRemoved} expired state entries (older than ${ttlDays} days)`);
+  }
 
   // Run first poll immediately
   pollOnce({ configPath }).catch((err) => {
