@@ -185,7 +185,7 @@ export async function pollOnce(options = {}) {
           if (result.success) {
             // Mark as processed to avoid re-triggering
             if (pollerInstance) {
-              pollerInstance.markProcessed(item.id, { repoKey, command: result.command });
+              pollerInstance.markProcessed(item.id, { repoKey: item.repo_key, command: result.command });
             }
             console.log(`[poll] Started session for ${item.id}`);
           } else {

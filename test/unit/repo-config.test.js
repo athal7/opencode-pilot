@@ -352,7 +352,9 @@ sources: []
       
       // GitHub preset has response_key: items, user config doesn't override it
       assert.strictEqual(toolConfig.response_key, 'items');
-      assert.deepStrictEqual(toolConfig.mappings, { url: 'html_url' });
+      // GitHub provider has mapping for repository_full_name extraction from URL
+      assert.strictEqual(toolConfig.mappings.url, 'html_url');
+      assert.ok(toolConfig.mappings.repository_full_name, 'Should have repository_full_name mapping');
     });
 
     test('getToolProviderConfig falls back to preset provider config', async () => {
@@ -628,11 +630,12 @@ sources:
       loadRepoConfig(configPath);
       const sources = getSources();
 
-      // All GitHub presets should have repo field for automatic resolution
-      const mockItem = { repository: { full_name: 'myorg/backend' } };
+      // All GitHub presets should have repo field that references repository_full_name
+      // (which is mapped from repository_url by the GitHub provider)
+      const mockItem = { repository_full_name: 'myorg/backend' };
       
       for (const source of sources) {
-        assert.strictEqual(source.repo, '{repository.full_name}', `Preset ${source.name} should have repo field`);
+        assert.strictEqual(source.repo, '{repository_full_name}', `Preset ${source.name} should have repo field`);
         const repos = resolveRepoForItem(source, mockItem);
         assert.deepStrictEqual(repos, ['myorg/backend'], `Preset ${source.name} should resolve repo from item`);
       }
@@ -651,12 +654,12 @@ sources:
       loadRepoConfig(configPath);
       const source = getSources()[0];
 
-      // Item from allowed repo should resolve
-      const allowedItem = { repository: { full_name: 'myorg/backend' } };
+      // Item from allowed repo should resolve (repository_full_name is mapped from repository_url)
+      const allowedItem = { repository_full_name: 'myorg/backend' };
       assert.deepStrictEqual(resolveRepoForItem(source, allowedItem), ['myorg/backend']);
 
       // Item from non-allowed repo should return empty (filtered out)
-      const filteredItem = { repository: { full_name: 'other/repo' } };
+      const filteredItem = { repository_full_name: 'other/repo' };
       assert.deepStrictEqual(resolveRepoForItem(source, filteredItem), []);
     });
   });

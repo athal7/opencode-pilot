@@ -3,7 +3,9 @@
 # Provider-level config (applies to all GitHub presets)
 _provider:
   response_key: items
-  mappings: {}
+  mappings:
+    # Extract repo full name from repository_url (e.g., "https://api.github.com/repos/owner/repo")
+    repository_full_name: "repository_url:/repos\\/([^/]+\\/[^/]+)$/"
 
 # Presets
 my-issues:
@@ -15,7 +17,7 @@ my-issues:
     q: "is:issue assignee:@me state:open"
   item:
     id: "{html_url}"
-  repo: "{repository.full_name}"
+  repo: "{repository_full_name}"
 
 review-requests:
   name: review-requests
@@ -26,7 +28,7 @@ review-requests:
     q: "is:pr review-requested:@me state:open"
   item:
     id: "{html_url}"
-  repo: "{repository.full_name}"
+  repo: "{repository_full_name}"
 
 my-prs-feedback:
   name: my-prs-feedback
@@ -37,4 +39,4 @@ my-prs-feedback:
     q: "is:pr author:@me state:open review:changes_requested"
   item:
     id: "{html_url}"
-  repo: "{repository.full_name}"
+  repo: "{repository_full_name}"
