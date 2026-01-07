@@ -15,7 +15,7 @@ import path from "path";
 import os from "os";
 import YAML from "yaml";
 import { getNestedValue } from "./utils.js";
-import { expandPreset, expandGitHubShorthand } from "./presets/index.js";
+import { expandPreset, expandGitHubShorthand, getProviderConfig } from "./presets/index.js";
 
 // Default config path
 const DEFAULT_CONFIG_PATH = path.join(
@@ -178,19 +178,36 @@ export function getToolMappings(provider) {
 
 /**
  * Get full tool provider configuration (response_key, mappings, etc.)
+ * Checks user config first, then falls back to preset provider defaults
  * @param {string} provider - Tool provider name (e.g., "github", "linear", "apple-reminders")
  * @returns {object|null} Tool config including response_key and mappings, or null if not configured
  */
 export function getToolProviderConfig(provider) {
   const config = getRawConfig();
   const tools = config.tools || {};
-  const toolConfig = tools[provider];
+  const userToolConfig = tools[provider];
+  
+  // Get preset provider config as fallback
+  const presetProviderConfig = getProviderConfig(provider);
 
-  if (!toolConfig) {
-    return null;
+  // If user has config, merge with preset defaults (user takes precedence)
+  if (userToolConfig) {
+    if (presetProviderConfig) {
+      return {
+        ...presetProviderConfig,
+        ...userToolConfig,
+        // Deep merge mappings
+        mappings: {
+          ...(presetProviderConfig.mappings || {}),
+          ...(userToolConfig.mappings || {}),
+        },
+      };
+    }
+    return userToolConfig;
   }
 
-  return toolConfig;
+  // Fall back to preset provider config
+  return presetProviderConfig;
 }
 
 /**

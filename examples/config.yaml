@@ -11,30 +11,6 @@ defaults:
   prompt: default                    # Default prompt template
 
 # =============================================================================
-# TOOLS - Field mappings for MCP servers (normalize different APIs)
-#
-# Each tool provider can specify:
-#   response_key: Key to extract array from response (e.g., "reminders", "nodes")
-#   mappings: Field name translations (e.g., { body: "description" })
-# =============================================================================
-tools:
-  github:
-    response_key: items             # GitHub search returns { items: [...] }
-    mappings: {}                    # GitHub already uses standard field names
-
-  linear:
-    response_key: nodes             # Linear returns { nodes: [...] }
-    mappings:
-      body: title                         # Use title as body
-      number: "url:/([A-Z0-9]+-[0-9]+)/"  # Extract PROJ-123 from URL
-
-  apple-reminders:
-    response_key: reminders         # Apple Reminders returns { reminders: [...] }
-    mappings:
-      title: name                   # Reminders uses 'name' not 'title'
-      body: notes                   # Reminders uses 'notes' for details
-
-# =============================================================================
 # SOURCES - What to poll
 #
 # Three syntax options:
@@ -76,7 +52,7 @@ sources:
 
   # ----- FULL SYNTAX (for non-GitHub sources or full control) -----
   
-  # Apple Reminders example
+  # Apple Reminders example (requires tools config below)
   # - name: agent-tasks
   #   tool:
   #     mcp: apple-reminders
@@ -90,7 +66,24 @@ sources:
   #   working_dir: ~
 
 # =============================================================================
-# Available presets:
+# TOOLS - Field mappings for custom MCP servers (OPTIONAL)
+#
+# Note: GitHub and Linear presets include built-in mappings.
+# Only needed for custom sources or to override preset defaults.
+#
+# Each tool provider can specify:
+#   response_key: Key to extract array from response (e.g., "reminders")
+#   mappings: Field name translations (e.g., { body: "notes" })
+# =============================================================================
+# tools:
+#   apple-reminders:
+#     response_key: reminders
+#     mappings:
+#       title: name
+#       body: notes
+
+# =============================================================================
+# Available presets (no tools config needed):
 #   github/my-issues        - Issues assigned to me
 #   github/review-requests  - PRs needing my review  
 #   github/my-prs-feedback  - My PRs with change requests

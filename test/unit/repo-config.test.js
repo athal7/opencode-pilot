@@ -350,8 +350,47 @@ sources: []
       
       const toolConfig = getToolProviderConfig('github');
       
-      assert.strictEqual(toolConfig.response_key, undefined);
+      // GitHub preset has response_key: items, user config doesn't override it
+      assert.strictEqual(toolConfig.response_key, 'items');
       assert.deepStrictEqual(toolConfig.mappings, { url: 'html_url' });
+    });
+
+    test('getToolProviderConfig falls back to preset provider config', async () => {
+      writeFileSync(configPath, `
+sources: []
+`);
+
+      const { loadRepoConfig, getToolProviderConfig } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      
+      // Linear preset has provider config with response_key and mappings
+      const toolConfig = getToolProviderConfig('linear');
+      
+      assert.strictEqual(toolConfig.response_key, 'nodes');
+      assert.strictEqual(toolConfig.mappings.body, 'title');
+      assert.strictEqual(toolConfig.mappings.number, 'url:/([A-Z0-9]+-[0-9]+)/');
+    });
+
+    test('getToolProviderConfig merges user config with preset defaults', async () => {
+      writeFileSync(configPath, `
+tools:
+  linear:
+    mappings:
+      custom_field: some_source
+
+sources: []
+`);
+
+      const { loadRepoConfig, getToolProviderConfig } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      
+      const toolConfig = getToolProviderConfig('linear');
+      
+      // Should have preset response_key
+      assert.strictEqual(toolConfig.response_key, 'nodes');
+      // Should have preset mappings plus user mappings
+      assert.strictEqual(toolConfig.mappings.body, 'title');
+      assert.strictEqual(toolConfig.mappings.custom_field, 'some_source');
     });
   });
 

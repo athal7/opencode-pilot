@@ -5,6 +5,8 @@
  * for common polling sources like GitHub issues and Linear tickets.
  * 
  * Presets are loaded from YAML files in this directory.
+ * Each file can include a _provider key with provider-level config
+ * (response_key, mappings) that applies to all presets for that provider.
  */
 
 import fs from "fs";
@@ -14,23 +16,41 @@ import YAML from "yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Cache for loaded provider data
+const providerCache = {};
+
 /**
- * Load presets from a YAML file
+ * Load provider data from a YAML file
  * @param {string} provider - Provider name (e.g., "github", "linear")
- * @returns {object} Presets object keyed by preset name
+ * @returns {object} Provider data with presets and _provider config
  */
-function loadPresetsFromFile(provider) {
+function loadProviderData(provider) {
+  if (providerCache[provider]) {
+    return providerCache[provider];
+  }
+
   const filePath = path.join(__dirname, `${provider}.yaml`);
   if (!fs.existsSync(filePath)) {
-    return {};
+    providerCache[provider] = { presets: {}, providerConfig: null };
+    return providerCache[provider];
   }
   
   try {
     const content = fs.readFileSync(filePath, "utf-8");
-    return YAML.parse(content) || {};
+    const data = YAML.parse(content) || {};
+    
+    // Extract _provider config and presets
+    const { _provider, ...presets } = data;
+    
+    providerCache[provider] = {
+      presets,
+      providerConfig: _provider || null,
+    };
+    return providerCache[provider];
   } catch (err) {
     console.error(`Warning: Failed to load presets from ${filePath}: ${err.message}`);
-    return {};
+    providerCache[provider] = { presets: {}, providerConfig: null };
+    return providerCache[provider];
   }
 }
 
@@ -43,7 +63,7 @@ function buildPresetsRegistry() {
   const providers = ["github", "linear"];
   
   for (const provider of providers) {
-    const presets = loadPresetsFromFile(provider);
+    const { presets } = loadProviderData(provider);
     for (const [name, config] of Object.entries(presets)) {
       registry[`${provider}/${name}`] = config;
     }
@@ -62,6 +82,16 @@ const PRESETS = buildPresetsRegistry();
  */
 export function getPreset(presetName) {
   return PRESETS[presetName] || null;
+}
+
+/**
+ * Get provider config (response_key, mappings) for a provider
+ * @param {string} provider - Provider name (e.g., "github", "linear")
+ * @returns {object|null} Provider config or null if not found
+ */
+export function getProviderConfig(provider) {
+  const { providerConfig } = loadProviderData(provider);
+  return providerConfig;
 }
 
 /**

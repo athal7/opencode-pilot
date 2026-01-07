@@ -1,5 +1,11 @@
 # GitHub source presets
 
+# Provider-level config (applies to all GitHub presets)
+_provider:
+  response_key: items
+  mappings: {}
+
+# Presets
 my-issues:
   name: my-issues
   tool:
