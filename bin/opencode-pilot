@@ -272,10 +272,20 @@ async function configCommand() {
     }
   }
 
-  // Validate sources section
+  // Validate sources section (use getSources to expand presets)
   console.log("");
   console.log("Sources:");
-  const sources = config.sources || [];
+  const { loadRepoConfig, getSources } = await import(join(serviceDir, "repo-config.js"));
+  loadRepoConfig(PILOT_CONFIG_FILE);
+  
+  let sources;
+  try {
+    sources = getSources();
+  } catch (err) {
+    console.log(`  ✗ Failed to load sources: ${err.message}`);
+    sources = [];
+  }
+  
   if (sources.length === 0) {
     console.log("  (none configured)");
   } else {
