@@ -43,83 +43,27 @@ npm install -g opencode-pilot
 
 See [examples/config.yaml](examples/config.yaml) for a complete example with all options.
 
-### Source Syntax Options
-
-Three ways to configure sources, from simplest to most flexible:
-
-#### 1. Presets (recommended)
-
-Built-in presets for common patterns:
-
-```yaml
-sources:
-  - preset: github/my-issues
-    prompt: worktree
-
-  - preset: github/review-requests
-    prompt: review
-
-  - preset: linear/my-issues
-    args:
-      teamId: "your-team-uuid"
-      assigneeId: "your-user-uuid"
-```
-
-**Available presets:**
-- `github/my-issues` - Issues assigned to me
-- `github/review-requests` - PRs needing my review
-- `github/my-prs-feedback` - My PRs with change requests
-- `linear/my-issues` - Linear tickets (requires `teamId`, `assigneeId`)
-
-#### 2. GitHub Shorthand
-
-For custom GitHub queries:
-
-```yaml
-sources:
-  - name: urgent-issues
-    github: "is:issue assignee:@me label:urgent state:open"
-    prompt: worktree
-```
-
-#### 3. Full Syntax
-
-For non-GitHub sources or complete control:
-
-```yaml
-sources:
-  - name: agent-tasks
-    tool:
-      mcp: apple-reminders
-      name: list_reminders
-    args:
-      list_name: "Agent Tasks"
-    item:
-      id: "reminder:{id}"
-    prompt: agent-planning
-```
-
-### Defaults
-
-Apply settings to all sources:
-
-```yaml
-defaults:
-  agent: plan
-  prompt: default
-
-sources:
-  - preset: github/my-issues      # Gets agent: plan, prompt: default
-  - preset: github/review-requests
-    prompt: review                # Overrides default prompt
-```
-
 ### Key Sections
 
 - **`defaults`** - Default values applied to all sources
 - **`sources`** - What to poll (presets, shorthand, or full config)
 - **`tools`** - Field mappings to normalize different MCP APIs
 - **`repos`** - Repository paths and settings (use YAML anchors to share config)
+
+### Source Syntax
+
+Three ways to configure sources, from simplest to most flexible:
+
+1. **Presets** - Built-in definitions for common patterns (`github/my-issues`, `github/review-requests`, etc.)
+2. **GitHub shorthand** - Simple `github: "query"` syntax for custom GitHub searches
+3. **Full syntax** - Complete control with `tool`, `args`, and `item` for any MCP source
+
+### Available Presets
+
+- `github/my-issues` - Issues assigned to me
+- `github/review-requests` - PRs needing my review
+- `github/my-prs-feedback` - My PRs with change requests
+- `linear/my-issues` - Linear tickets (requires `teamId`, `assigneeId`)
 
 ### Prompt Templates
 
