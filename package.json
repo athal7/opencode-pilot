@@ -1,6 +1,6 @@
 {
   "name": "opencode-pilot",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "type": "module",
   "main": "plugin/index.js",
   "description": "Automation daemon for OpenCode - polls for work and spawns sessions",
