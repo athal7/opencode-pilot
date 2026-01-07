@@ -99,6 +99,19 @@ sources:
 #     path: ~/code/frontend
 
 # =============================================================================
+# CLEANUP - Automatic state cleanup (OPTIONAL)
+#
+# Poll state entries are automatically cleaned up:
+# - TTL-based: Entries older than ttl_days are removed on startup
+# - Source-aware: Entries for items no longer returned by a source are removed
+#   (only if older than 1 day, to avoid false positives from API issues)
+#
+# Manual cleanup: opencode-pilot clear [--all | --source NAME | --item ID]
+# =============================================================================
+# cleanup:
+#   ttl_days: 30  # Days before entries expire (default: 30)
+
+# =============================================================================
 # Available presets (no tools config needed):
 #   github/my-issues        - Issues assigned to me
 #   github/review-requests  - PRs needing my review  

@@ -75,6 +75,11 @@ Create prompt templates as markdown files in `~/.config/opencode-pilot/templates
 opencode-pilot start              # Start the service (foreground)
 opencode-pilot status             # Check status
 opencode-pilot config             # Validate and show config
+opencode-pilot clear              # Show state summary
+opencode-pilot clear --all        # Clear all processed state
+opencode-pilot clear --expired    # Clear expired entries (uses configured TTL)
+opencode-pilot clear --source X   # Clear entries for source X
+opencode-pilot clear --item ID    # Clear specific item
 opencode-pilot test-source NAME   # Test a source
 opencode-pilot test-mapping MCP   # Test field mappings
 ```
