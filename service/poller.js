@@ -412,13 +412,14 @@ export function createPoller(options = {}) {
      */
     cleanupMissingFromSource(sourceName, currentItemIds, minAgeDays = 1) {
       const currentSet = new Set(currentItemIds);
-      const minAgeMs = Date.now() - (minAgeDays * 24 * 60 * 60 * 1000);
+      // Timestamp cutoff: entries processed before this time are eligible for cleanup
+      const cutoffTimestamp = Date.now() - (minAgeDays * 24 * 60 * 60 * 1000);
       let removed = 0;
       for (const [id, meta] of processedItems) {
         if (meta.source === sourceName && !currentSet.has(id)) {
           const processedAt = new Date(meta.processedAt).getTime();
           // Use <= to allow immediate cleanup when minAgeDays=0
-          if (processedAt <= minAgeMs) {
+          if (processedAt <= cutoffTimestamp) {
             processedItems.delete(id);
             removed++;
           }

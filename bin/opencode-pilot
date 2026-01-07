@@ -616,45 +616,51 @@ async function testMappingCommand(mcpName) {
 // ============================================================================
 
 async function clearCommand(flags) {
-  const { createPoller } = await import(join(serviceDir, "poller.js"));
-  const { loadRepoConfig, getCleanupTtlDays } = await import(join(serviceDir, "repo-config.js"));
-  
-  // Load config for TTL settings
-  if (existsSync(PILOT_CONFIG_FILE)) {
-    loadRepoConfig(PILOT_CONFIG_FILE);
-  }
-  
-  const poller = createPoller();
-  const beforeCount = poller.getProcessedCount();
-  
-  if (flags.all) {
-    poller.clearState();
-    console.log(`Cleared all ${beforeCount} processed entries`);
-  } else if (flags.source) {
-    const removed = poller.clearBySource(flags.source);
-    console.log(`Cleared ${removed} entries for source: ${flags.source}`);
-  } else if (flags.item) {
-    if (poller.isProcessed(flags.item)) {
-      poller.clearProcessed(flags.item);
-      console.log(`Cleared item: ${flags.item}`);
-    } else {
-      console.log(`Item not found in processed state: ${flags.item}`);
+  try {
+    const { createPoller } = await import(join(serviceDir, "poller.js"));
+    const { loadRepoConfig, getCleanupTtlDays } = await import(join(serviceDir, "repo-config.js"));
+    
+    // Load config for TTL settings
+    if (existsSync(PILOT_CONFIG_FILE)) {
+      loadRepoConfig(PILOT_CONFIG_FILE);
     }
-  } else if (flags.expired) {
-    const ttlDays = getCleanupTtlDays();
-    const removed = poller.cleanupExpired(ttlDays);
-    console.log(`Cleared ${removed} entries older than ${ttlDays} days`);
-  } else {
-    // No flags - show current state summary
-    console.log("Poll state summary:");
-    console.log(`  Total entries: ${beforeCount}`);
-    console.log(`  State file: ~/.config/opencode-pilot/poll-state.json`);
-    console.log("");
-    console.log("Usage:");
-    console.log("  opencode-pilot clear --all           Clear all entries");
-    console.log("  opencode-pilot clear --source NAME   Clear entries for source");
-    console.log("  opencode-pilot clear --item ID       Clear specific item");
-    console.log("  opencode-pilot clear --expired       Clear expired entries");
+    
+    const poller = createPoller();
+    const beforeCount = poller.getProcessedCount();
+    
+    if (flags.all) {
+      poller.clearState();
+      console.log(`Cleared all ${beforeCount} processed entries`);
+    } else if (flags.source) {
+      const removed = poller.clearBySource(flags.source);
+      console.log(`Cleared ${removed} entries for source: ${flags.source}`);
+    } else if (flags.item) {
+      if (poller.isProcessed(flags.item)) {
+        poller.clearProcessed(flags.item);
+        console.log(`Cleared item: ${flags.item}`);
+      } else {
+        console.log(`Item not found in processed state: ${flags.item}`);
+      }
+    } else if (flags.expired) {
+      const ttlDays = getCleanupTtlDays();
+      const removed = poller.cleanupExpired(ttlDays);
+      console.log(`Cleared ${removed} entries older than ${ttlDays} days`);
+    } else {
+      // No flags - show current state summary
+      console.log("Poll state summary:");
+      console.log(`  Total entries: ${beforeCount}`);
+      console.log(`  State file: ~/.config/opencode-pilot/poll-state.json`);
+      console.log("");
+      console.log("Usage:");
+      console.log("  opencode-pilot clear --all           Clear all entries");
+      console.log("  opencode-pilot clear --source NAME   Clear entries for source");
+      console.log("  opencode-pilot clear --item ID       Clear specific item");
+      console.log("  opencode-pilot clear --expired       Clear expired entries");
+    }
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    console.error("The state file may be corrupted. Try: opencode-pilot clear --all");
+    process.exit(1);
   }
 }
 
