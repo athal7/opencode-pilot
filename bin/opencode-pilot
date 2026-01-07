@@ -247,14 +247,7 @@ async function configCommand() {
     process.exit(1);
   }
 
-  // Validate defaults section
-  console.log("");
-  console.log("Defaults:");
   const defaults = config.defaults || {};
-  console.log(`  working_dir: ${defaults.working_dir || "~"}`);
-  console.log(`  prompt: ${defaults.prompt || "default"}`);
-  if (defaults.agent) console.log(`  agent: ${defaults.agent}`);
-  if (defaults.model) console.log(`  model: ${defaults.model}`);
 
   // Validate repos section
   console.log("");
@@ -314,16 +307,40 @@ async function configCommand() {
         console.log(`  ✓ ${name}: ${tool.mcp}/${tool.name}`);
       }
       
-      // Show repo resolution
-      if (source.repo) {
+      // Show prompt and agent
+      const prompt = source.prompt || defaults.prompt || "default";
+      const agent = source.agent || defaults.agent;
+      console.log(`      prompt: ${prompt}`);
+      if (agent) console.log(`      agent: ${agent}`);
+      
+      // Show repo resolution - interpolate template with configured repos
+      const configuredRepos = Object.keys(config.repos || {});
+      if (source.repos) {
+        // Explicit repos filter - check if it's all configured repos
+        const isAll = configuredRepos.length > 0 && 
+          source.repos.length === configuredRepos.length &&
+          source.repos.every(r => configuredRepos.includes(r));
+        if (isAll) {
+          console.log(`      repos: all`);
+        } else {
+          for (const repo of source.repos) {
+            console.log(`      repo: ${repo}`);
+          }
+        }
+      } else if (source.repo && source.repo.includes("{")) {
+        // Template like {repository_full_name} - matches all configured repos
+        if (configuredRepos.length > 0) {
+          console.log(`      repos: all`);
+        } else {
+          console.log(`      repos: (none configured)`);
+        }
+      } else if (source.repo) {
+        // Static repo
         console.log(`      repo: ${source.repo}`);
-      } else if (source.repos) {
-        console.log(`      repos: ${Array.isArray(source.repos) ? source.repos.join(", ") : JSON.stringify(source.repos)}`);
       } else if (source.working_dir) {
         console.log(`      working_dir: ${source.working_dir}`);
-      } else {
-        console.log(`      (uses defaults.working_dir)`);
       }
+      // Don't show working_dir if it's just the default
     }
   }
 
