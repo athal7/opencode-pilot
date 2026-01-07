@@ -428,5 +428,47 @@ export function createPoller(options = {}) {
       if (removed > 0) saveState();
       return removed;
     },
+    
+    /**
+     * Check if an item should be reprocessed based on state changes
+     * Returns true if:
+     * - Item was reopened (closed/merged -> open)
+     * - Item status changed (for Linear: Done -> In Progress)
+     * - Item was updated after being processed
+     * @param {object} item - Current item from source
+     * @returns {boolean} True if item should be reprocessed
+     */
+    shouldReprocess(item) {
+      if (!item.id) return false;
+      
+      const meta = processedItems.get(item.id);
+      if (!meta) return false; // Not processed before
+      if (!meta.itemState) return false; // No state tracking (legacy entry)
+      
+      // Get current state from item (GitHub uses 'state', Linear uses 'status')
+      const currentState = item.state || item.status;
+      if (!currentState) return false;
+      
+      // Check if state changed from closed/done to open/in-progress
+      const storedState = meta.itemState.toLowerCase();
+      const newState = currentState.toLowerCase();
+      
+      // Reopened: was closed/merged, now open
+      if ((storedState === 'closed' || storedState === 'merged' || storedState === 'done') 
+          && (newState === 'open' || newState === 'in progress')) {
+        return true;
+      }
+      
+      // Check updated_at timestamp if available
+      if (meta.itemUpdatedAt && item.updated_at) {
+        const storedUpdatedAt = new Date(meta.itemUpdatedAt).getTime();
+        const currentUpdatedAt = new Date(item.updated_at).getTime();
+        if (currentUpdatedAt > storedUpdatedAt) {
+          return true;
+        }
+      }
+      
+      return false;
+    },
   };
 }

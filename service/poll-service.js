@@ -157,8 +157,15 @@ export async function pollOnce(options = {}) {
     for (const item of sortedItems) {
       // Check if already processed
       if (pollerInstance && pollerInstance.isProcessed(item.id)) {
-        debug(`Skipping ${item.id} - already processed`);
-        continue;
+        // Check if item should be reprocessed (reopened, status changed, etc.)
+        if (pollerInstance.shouldReprocess(item)) {
+          debug(`Reprocessing ${item.id} - state changed`);
+          pollerInstance.clearProcessed(item.id);
+          console.log(`[poll] Reprocessing ${item.id} (reopened or updated)`);
+        } else {
+          debug(`Skipping ${item.id} - already processed`);
+          continue;
+        }
       }
 
       debug(`Executing action for ${item.id}`);
@@ -184,11 +191,14 @@ export async function pollOnce(options = {}) {
 
           if (result.success) {
             // Mark as processed to avoid re-triggering
+            // Store item state for detecting reopened/updated items
             if (pollerInstance) {
               pollerInstance.markProcessed(item.id, { 
                 repoKey: item.repo_key, 
                 command: result.command,
                 source: sourceName,
+                itemState: item.state || item.status || null,
+                itemUpdatedAt: item.updated_at || null,
               });
             }
             console.log(`[poll] Started session for ${item.id}`);

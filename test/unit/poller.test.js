@@ -297,6 +297,107 @@ describe('poller.js', () => {
     });
   });
 
+  describe('status tracking', () => {
+    test('shouldReprocess returns false for item with same state', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('issue-1', { source: 'test', itemState: 'open' });
+      
+      const item = { id: 'issue-1', state: 'open' };
+      assert.strictEqual(poller.shouldReprocess(item), false);
+    });
+
+    test('shouldReprocess returns true for reopened issue (closed -> open)', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('issue-1', { source: 'test', itemState: 'closed' });
+      
+      const item = { id: 'issue-1', state: 'open' };
+      assert.strictEqual(poller.shouldReprocess(item), true);
+    });
+
+    test('shouldReprocess returns true for merged PR reopened', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('pr-1', { source: 'test', itemState: 'merged' });
+      
+      const item = { id: 'pr-1', state: 'open' };
+      assert.strictEqual(poller.shouldReprocess(item), true);
+    });
+
+    test('shouldReprocess returns false for item not in state', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      
+      const item = { id: 'new-issue', state: 'open' };
+      assert.strictEqual(poller.shouldReprocess(item), false);
+    });
+
+    test('shouldReprocess returns false when no itemState was stored', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      // Legacy entry without itemState
+      poller.markProcessed('issue-1', { source: 'test' });
+      
+      const item = { id: 'issue-1', state: 'open' };
+      assert.strictEqual(poller.shouldReprocess(item), false);
+    });
+
+    test('shouldReprocess uses status field for Linear items', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('linear-1', { source: 'test', itemState: 'Done' });
+      
+      // Linear uses 'status' field instead of 'state'
+      const item = { id: 'linear-1', status: 'In Progress' };
+      assert.strictEqual(poller.shouldReprocess(item), true);
+    });
+
+    test('shouldReprocess detects changes via updated_at timestamp', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('issue-1', { 
+        source: 'test', 
+        itemState: 'open',
+        itemUpdatedAt: '2026-01-01T00:00:00Z'
+      });
+      
+      // Item was updated after being processed
+      const item = { 
+        id: 'issue-1', 
+        state: 'open',
+        updated_at: '2026-01-05T00:00:00Z'
+      };
+      assert.strictEqual(poller.shouldReprocess(item), true);
+    });
+
+    test('shouldReprocess returns false if updated_at is same or older', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('issue-1', { 
+        source: 'test', 
+        itemState: 'open',
+        itemUpdatedAt: '2026-01-05T00:00:00Z'
+      });
+      
+      // Item has same updated_at
+      const item = { 
+        id: 'issue-1', 
+        state: 'open',
+        updated_at: '2026-01-05T00:00:00Z'
+      };
+      assert.strictEqual(poller.shouldReprocess(item), false);
+    });
+  });
+
   describe('pollGenericSource', () => {
     test('extracts tool config from source', async () => {
       const { getToolConfig } = await import('../../service/poller.js');
