@@ -4,9 +4,11 @@
 # Also create templates/ directory with prompt template files
 
 # =============================================================================
-# SERVICE - Daemon configuration
+# DEFAULTS - Applied to all sources (source values override these)
 # =============================================================================
-# port: 4097                        # HTTP port for health checks (default: 4097)
+defaults:
+  agent: plan                        # Default agent for all sources
+  prompt: default                    # Default prompt template
 
 # =============================================================================
 # TOOLS - Field mappings for MCP servers (normalize different APIs)
@@ -33,46 +35,64 @@ tools:
       body: notes                   # Reminders uses 'notes' for details
 
 # =============================================================================
-# SOURCES - What to poll (generic MCP tool references)
+# SOURCES - What to poll
+#
+# Three syntax options:
+#   1. Presets: Use built-in presets for common patterns
+#   2. Shorthand: Use `github: "query"` for GitHub sources
+#   3. Full: Specify tool, args, item for custom sources
 # =============================================================================
 sources:
+  # ----- PRESET SYNTAX (recommended for common patterns) -----
+  
   # GitHub issues assigned to me
-  - name: my-issues
-    tool:
-      mcp: github
-      name: search_issues
-    args:
-      q: "is:issue assignee:@me state:open"
-    item:
-      id: "{html_url}"
+  - preset: github/my-issues
     prompt: worktree
-    agent: plan
 
-  # GitHub PRs needing review
-  - name: review-requests
-    tool:
-      mcp: github
-      name: search_issues
-    args:
-      q: "is:pr review-requested:@me state:open"
-    item:
-      id: "{html_url}"
+  # GitHub PRs needing my review
+  - preset: github/review-requests
     prompt: review
-    agent: plan
 
-  # Linear issues
-  # NOTE: Replace teamId and assigneeId with your actual Linear UUIDs
-  # Find these via: linear_list_teams and check user IDs in team members
-  - name: linear-work
-    tool:
-      mcp: linear
-      name: list_issues
+  # My PRs that have change requests
+  - preset: github/my-prs-feedback
+    prompt: review-feedback
+
+  # Linear issues (requires teamId and assigneeId)
+  # Find IDs via: opencode-pilot discover linear
+  - preset: linear/my-issues
     args:
       teamId: "your-team-uuid"      # Replace with actual team UUID
       assigneeId: "your-user-uuid"  # Replace with actual user UUID
-      status: "Todo"
-    item:
-      id: "linear:{id}"
+      status: "In Progress"
     working_dir: ~/code/myproject
     prompt: worktree
-    agent: plan
+
+  # ----- SHORTHAND SYNTAX (for custom GitHub queries) -----
+  
+  # Custom GitHub query with shorthand
+  # - name: urgent-issues
+  #   github: "is:issue assignee:@me label:urgent state:open"
+  #   prompt: worktree
+
+  # ----- FULL SYNTAX (for non-GitHub sources or full control) -----
+  
+  # Apple Reminders example
+  # - name: agent-tasks
+  #   tool:
+  #     mcp: apple-reminders
+  #     name: list_reminders
+  #   args:
+  #     list_name: "Agent Tasks"
+  #     completed: false
+  #   item:
+  #     id: "reminder:{id}"
+  #   prompt: agent-planning
+  #   working_dir: ~
+
+# =============================================================================
+# Available presets:
+#   github/my-issues        - Issues assigned to me
+#   github/review-requests  - PRs needing my review  
+#   github/my-prs-feedback  - My PRs with change requests
+#   linear/my-issues        - Linear tickets (requires teamId, assigneeId)
+# =============================================================================
