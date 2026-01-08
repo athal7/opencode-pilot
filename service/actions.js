@@ -9,6 +9,7 @@ import { spawn, execSync } from "child_process";
 import { readFileSync, existsSync } from "fs";
 import { debug } from "./logger.js";
 import { getNestedValue } from "./utils.js";
+import { getServerPort } from "./repo-config.js";
 import path from "path";
 import os from "os";
 
@@ -99,10 +100,11 @@ function isServerHealthy(project) {
  * Discover a running opencode server that matches the target directory
  * 
  * Queries all running opencode servers and finds the best match based on:
- * 1. Exact sandbox match (highest priority)
- * 2. Exact worktree match
- * 3. Target is subdirectory of worktree
- * 4. Global server (worktree="/") as fallback
+ * 1. Configured server_port (highest priority if set and healthy)
+ * 2. Exact sandbox match
+ * 3. Exact worktree match
+ * 4. Target is subdirectory of worktree
+ * 5. Global server (worktree="/") as fallback
  * 
  * Global servers are used as a fallback when no project-specific match is found,
  * since OpenCode Desktop may be connected to a global server that can display
@@ -112,11 +114,13 @@ function isServerHealthy(project) {
  * @param {object} [options] - Options for testing/mocking
  * @param {function} [options.getPorts] - Function to get server ports
  * @param {function} [options.fetch] - Function to fetch URLs
+ * @param {number} [options.preferredPort] - Preferred port to use (overrides config)
  * @returns {Promise<string|null>} Server URL (e.g., "http://localhost:4096") or null
  */
 export async function discoverOpencodeServer(targetDir, options = {}) {
   const getPorts = options.getPorts || getOpencodePorts;
   const fetchFn = options.fetch || fetch;
+  const preferredPort = options.preferredPort ?? getServerPort();
   
   const ports = await getPorts();
   if (ports.length === 0) {
@@ -124,7 +128,24 @@ export async function discoverOpencodeServer(targetDir, options = {}) {
     return null;
   }
   
-  debug(`discoverOpencodeServer: checking ${ports.length} servers for ${targetDir}`);
+  debug(`discoverOpencodeServer: checking ${ports.length} servers for ${targetDir}, preferredPort=${preferredPort}`);
+  
+  // If preferred port is configured and running, check it first
+  if (preferredPort && ports.includes(preferredPort)) {
+    const url = `http://localhost:${preferredPort}`;
+    try {
+      const response = await fetchFn(`${url}/project/current`);
+      if (response.ok) {
+        const project = await response.json();
+        if (isServerHealthy(project)) {
+          debug(`discoverOpencodeServer: using preferred port ${preferredPort}`);
+          return url;
+        }
+      }
+    } catch (err) {
+      debug(`discoverOpencodeServer: preferred port ${preferredPort} error: ${err.message}`);
+    }
+  }
   
   let bestMatch = null;
   let bestScore = 0;

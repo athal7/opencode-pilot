@@ -311,6 +311,15 @@ export function getCleanupTtlDays() {
 }
 
 /**
+ * Get preferred OpenCode server port from config
+ * @returns {number|null} Port number or null if not configured
+ */
+export function getServerPort() {
+  const config = getRawConfig();
+  return config?.server_port ?? null;
+}
+
+/**
  * Clear config cache (for testing)
  */
 export function clearConfigCache() {

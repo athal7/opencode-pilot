@@ -45,6 +45,7 @@ See [examples/config.yaml](examples/config.yaml) for a complete example with all
 
 ### Key Sections
 
+- **`server_port`** - Preferred OpenCode server port (e.g., `4096`). When multiple OpenCode instances are running, pilot attaches sessions to this port.
 - **`defaults`** - Default values applied to all sources
 - **`sources`** - What to poll (presets, shorthand, or full config)
 - **`tools`** - Field mappings to normalize different MCP APIs

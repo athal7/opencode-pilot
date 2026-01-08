@@ -1,6 +1,11 @@
 # Example config.yaml for opencode-pilot
 # Copy to ~/.config/opencode-pilot/config.yaml
 
+# Preferred OpenCode server port for attaching sessions
+# When multiple OpenCode instances are running, pilot will attach new sessions
+# to this port. If not set, pilot discovers servers automatically.
+# server_port: 4096
+
 defaults:
   agent: plan
   prompt: default
