@@ -102,10 +102,11 @@ function isServerHealthy(project) {
  * 1. Exact sandbox match (highest priority)
  * 2. Exact worktree match
  * 3. Target is subdirectory of worktree
+ * 4. Global server (worktree="/") as fallback
  * 
- * NOTE: Global servers (worktree="/") are NOT used - sessions spawned via
- * pilot should run in isolated mode rather than attach to the global project,
- * since the global project doesn't have the right working directory context.
+ * Global servers are used as a fallback when no project-specific match is found,
+ * since OpenCode Desktop may be connected to a global server that can display
+ * sessions for any project.
  * 
  * @param {string} targetDir - The directory we want to work in
  * @param {object} [options] - Options for testing/mocking
@@ -127,6 +128,7 @@ export async function discoverOpencodeServer(targetDir, options = {}) {
   
   let bestMatch = null;
   let bestScore = 0;
+  let globalServer = null;
   
   for (const port of ports) {
     const url = `http://localhost:${port}`;
@@ -148,9 +150,10 @@ export async function discoverOpencodeServer(targetDir, options = {}) {
       const worktree = project.worktree || '/';
       const sandboxes = project.sandboxes || [];
       
-      // Skip global servers - pilot sessions should run isolated
+      // Track global server as fallback (but prefer project-specific matches)
       if (worktree === '/') {
-        debug(`discoverOpencodeServer: ${url} is global project, skipping`);
+        debug(`discoverOpencodeServer: ${url} is global project, tracking as fallback`);
+        globalServer = url;
         continue;
       }
       
@@ -166,8 +169,10 @@ export async function discoverOpencodeServer(targetDir, options = {}) {
     }
   }
   
-  debug(`discoverOpencodeServer: best match=${bestMatch} score=${bestScore}`);
-  return bestMatch;
+  // Use project-specific match if found, otherwise fall back to global server
+  const result = bestMatch || globalServer;
+  debug(`discoverOpencodeServer: best match=${bestMatch} score=${bestScore}, global=${globalServer}, using=${result}`);
+  return result;
 }
 
 // Default templates directory

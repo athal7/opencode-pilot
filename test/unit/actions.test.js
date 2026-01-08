@@ -394,7 +394,7 @@ describe('actions.js', () => {
       assert.strictEqual(result, 'http://localhost:4000');
     });
 
-    test('skips global project servers', async () => {
+    test('uses global project server as fallback when no specific match', async () => {
       const { discoverOpencodeServer } = await import('../../service/actions.js');
       
       const mockPorts = async () => [3000];
@@ -406,13 +406,13 @@ describe('actions.js', () => {
         return { ok: false };
       };
       
-      // Global servers should be skipped - pilot sessions should run isolated
+      // Global servers should be used as fallback when no project-specific match
       const result = await discoverOpencodeServer('/Users/test/random/path', { 
         getPorts: mockPorts,
         fetch: mockFetch
       });
       
-      assert.strictEqual(result, null);
+      assert.strictEqual(result, 'http://localhost:3000');
     });
 
     test('returns null when fetch fails for all servers', async () => {
