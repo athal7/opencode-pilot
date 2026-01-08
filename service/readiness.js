@@ -4,8 +4,11 @@
  * Evaluates whether an issue is ready to be worked on based on:
  * - Label constraints (blocking labels, required labels)
  * - Dependencies (blocked by references in body)
+ * - Bot comment filtering (for PR feedback sources)
  * - Priority scoring (label weights, age bonus)
  */
+
+import { hasNonBotFeedback } from "./utils.js";
 
 /**
  * Dependency reference patterns in issue body
@@ -132,6 +135,45 @@ export function checkDependencies(issue, config) {
 }
 
 /**
+ * Check if a PR/issue has meaningful (non-bot, non-author) comments
+ * 
+ * This check is only applied when the item has been enriched with `_comments`
+ * (an array of comment objects with user.login and user.type fields).
+ * Items without `_comments` are considered ready (check is skipped).
+ * 
+ * Used to filter PRs from feedback sources where bot comments (CI, coverage, etc.)
+ * should not trigger the author to take action.
+ * 
+ * @param {object} item - Item with optional _comments array and user.login
+ * @param {object} config - Repo config (currently unused but kept for API consistency)
+ * @returns {object} { ready: boolean, reason?: string }
+ */
+export function checkBotComments(item, config) {
+  // Skip check if no _comments field (item not enriched)
+  if (!item._comments) {
+    return { ready: true };
+  }
+  
+  // Empty comments array means no comments - consider ready (no feedback)
+  if (item._comments.length === 0) {
+    return { ready: true };
+  }
+  
+  // Get author username
+  const authorUsername = item.user?.login;
+  
+  // Check if there's non-bot, non-author feedback
+  if (hasNonBotFeedback(item._comments, authorUsername)) {
+    return { ready: true };
+  }
+  
+  return {
+    ready: false,
+    reason: "Only bot or author comments - no human feedback requiring action",
+  };
+}
+
+/**
  * Calculate priority score for an issue
  * @param {object} issue - Issue with labels and created_at
  * @param {object} config - Repo config with readiness settings
@@ -190,6 +232,16 @@ export function evaluateReadiness(issue, config) {
     return {
       ready: false,
       reason: depResult.reason,
+      priority: 0,
+    };
+  }
+
+  // Check bot comments (for PRs enriched with _comments)
+  const botResult = checkBotComments(issue, config);
+  if (!botResult.ready) {
+    return {
+      ready: false,
+      reason: botResult.reason,
       priority: 0,
     };
   }

@@ -19,3 +19,65 @@ export function getNestedValue(obj, path) {
   }
   return value;
 }
+
+/**
+ * Check if a username represents a bot account
+ * 
+ * Detects bots by:
+ * 1. Username suffix: [bot] (e.g., "github-actions[bot]", "dependabot[bot]")
+ * 2. User type field: "Bot" (GitHub API provides this)
+ * 
+ * @param {string} username - GitHub username to check
+ * @param {string} [type] - User type from API (e.g., "Bot", "User")
+ * @returns {boolean} True if the user is a bot
+ */
+export function isBot(username, type) {
+  // Handle null/undefined/empty
+  if (!username) return false;
+  
+  // Check user type field (GitHub API provides "Bot" type)
+  if (type && type.toLowerCase() === "bot") return true;
+  
+  // Check for [bot] suffix in username
+  if (username.toLowerCase().endsWith("[bot]")) return true;
+  
+  return false;
+}
+
+/**
+ * Check if a PR/issue has non-bot feedback (comments from humans other than the author)
+ * 
+ * Used to filter out PRs where only bots have commented, since those don't
+ * require the author's attention for human feedback.
+ * 
+ * @param {Array} comments - Array of comment objects with user.login and user.type
+ * @param {string} authorUsername - Username of the PR/issue author
+ * @returns {boolean} True if there's at least one non-bot, non-author comment
+ */
+export function hasNonBotFeedback(comments, authorUsername) {
+  // Handle null/undefined/empty
+  if (!comments || !Array.isArray(comments) || comments.length === 0) {
+    return false;
+  }
+  
+  const authorLower = authorUsername?.toLowerCase();
+  
+  for (const comment of comments) {
+    const user = comment.user;
+    if (!user) continue;
+    
+    const username = user.login;
+    const userType = user.type;
+    
+    // Skip if it's a bot
+    if (isBot(username, userType)) continue;
+    
+    // Skip if it's the author themselves
+    if (authorLower && username?.toLowerCase() === authorLower) continue;
+    
+    // Found a non-bot, non-author comment
+    return true;
+  }
+  
+  return false;
+}

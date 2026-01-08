@@ -10,7 +10,7 @@
  */
 
 import { loadRepoConfig, getRepoConfig, getAllSources, getToolProviderConfig, resolveRepoForItem, getCleanupTtlDays } from "./repo-config.js";
-import { createPoller, pollGenericSource } from "./poller.js";
+import { createPoller, pollGenericSource, enrichItemsWithComments } from "./poller.js";
 import { evaluateReadiness, sortByPriority } from "./readiness.js";
 import { executeAction, buildCommand } from "./actions.js";
 import { debug } from "./logger.js";
@@ -126,6 +126,12 @@ export async function pollOnce(options = {}) {
         toolProviderConfig = getToolProviderConfig(source.tool.mcp);
         items = await pollGenericSource(source, { toolProviderConfig });
         debug(`Fetched ${items.length} items from ${sourceName}`);
+        
+        // Enrich items with comments for bot filtering if configured
+        if (source.filter_bot_comments) {
+          items = await enrichItemsWithComments(items, source);
+          debug(`Enriched ${items.length} items with comments for bot filtering`);
+        }
       } catch (err) {
         console.error(`[poll] Error fetching from ${sourceName}: ${err.message}`);
         continue;

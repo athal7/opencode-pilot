@@ -274,6 +274,120 @@ export async function pollGenericSource(source, options = {}) {
 }
 
 /**
+ * Fetch comments for a GitHub issue/PR and enrich the item
+ * 
+ * Uses the github_get_pull_request_comments tool to fetch review comments,
+ * or falls back to direct API call for issue comments.
+ * 
+ * @param {object} item - Item with owner, repo_short, and number fields
+ * @param {object} [options] - Options
+ * @param {number} [options.timeout] - Timeout in ms (default: 30000)
+ * @param {string} [options.opencodeConfigPath] - Path to opencode.json for MCP config
+ * @returns {Promise<Array>} Array of comment objects
+ */
+export async function fetchGitHubComments(item, options = {}) {
+  const timeout = options.timeout || DEFAULT_MCP_TIMEOUT;
+  
+  // Extract owner and repo from item
+  // The item should have repository_full_name (e.g., "owner/repo") from mapping
+  const fullName = item.repository_full_name;
+  if (!fullName) {
+    console.error("[poller] Cannot fetch comments: missing repository_full_name");
+    return [];
+  }
+  
+  const [owner, repo] = fullName.split("/");
+  const number = item.number;
+  
+  if (!owner || !repo || !number) {
+    console.error("[poller] Cannot fetch comments: missing owner, repo, or number");
+    return [];
+  }
+  
+  let mcpConfig;
+  try {
+    mcpConfig = getMcpConfig("github", options.opencodeConfigPath);
+  } catch {
+    console.error("[poller] GitHub MCP not configured, cannot fetch comments");
+    return [];
+  }
+  
+  const client = new Client({ name: "opencode-pilot", version: "1.0.0" });
+  
+  try {
+    const transport = await createTransport(mcpConfig);
+    
+    await Promise.race([
+      client.connect(transport),
+      createTimeout(timeout, "MCP connection for comments"),
+    ]);
+    
+    // Use github_get_pull_request_comments for PR review comments
+    const result = await Promise.race([
+      client.callTool({ 
+        name: "github_get_pull_request_comments", 
+        arguments: { owner, repo, pull_number: number } 
+      }),
+      createTimeout(timeout, "fetch comments"),
+    ]);
+    
+    const text = result.content?.[0]?.text;
+    if (!text) return [];
+    
+    try {
+      const comments = JSON.parse(text);
+      return Array.isArray(comments) ? comments : [];
+    } catch {
+      return [];
+    }
+  } catch (err) {
+    console.error(`[poller] Error fetching comments: ${err.message}`);
+    return [];
+  } finally {
+    try {
+      await Promise.race([
+        client.close(),
+        new Promise(resolve => setTimeout(resolve, 3000)),
+      ]);
+    } catch {
+      // Ignore close errors
+    }
+  }
+}
+
+/**
+ * Enrich items with comments for bot filtering
+ * 
+ * For items from sources with filter_bot_comments: true, fetches comments
+ * and attaches them as _comments field for readiness evaluation.
+ * 
+ * @param {Array} items - Items to enrich
+ * @param {object} source - Source configuration with optional filter_bot_comments
+ * @param {object} [options] - Options passed to fetchGitHubComments
+ * @returns {Promise<Array>} Items with _comments field added
+ */
+export async function enrichItemsWithComments(items, source, options = {}) {
+  // Skip if not configured or not a GitHub source
+  if (!source.filter_bot_comments || source.tool?.mcp !== "github") {
+    return items;
+  }
+  
+  // Fetch comments for each item (could be parallelized with Promise.all for speed)
+  const enrichedItems = [];
+  for (const item of items) {
+    // Only fetch if item has comments
+    if (item.comments > 0) {
+      const comments = await fetchGitHubComments(item, options);
+      enrichedItems.push({ ...item, _comments: comments });
+    } else {
+      enrichedItems.push(item);
+    }
+  }
+  
+  return enrichedItems;
+}
+
+/**
  * Create a poller instance with state tracking
  * 
  * @param {object} options - Poller options

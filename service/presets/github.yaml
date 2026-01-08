@@ -57,3 +57,6 @@ my-prs-feedback:
   reprocess_on:
     - state
     - updated_at
+  # Filter out PRs where all comments are from bots or the PR author
+  # Fetches comments via API and enriches items with _comments for readiness check
+  filter_bot_comments: true
