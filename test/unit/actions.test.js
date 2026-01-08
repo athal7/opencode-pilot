@@ -394,25 +394,25 @@ describe('actions.js', () => {
       assert.strictEqual(result, 'http://localhost:4000');
     });
 
-    test('falls back to healthy global project when no specific match', async () => {
+    test('skips global project servers', async () => {
       const { discoverOpencodeServer } = await import('../../service/actions.js');
       
       const mockPorts = async () => [3000];
       const mockFetch = async (url) => {
         if (url === 'http://localhost:3000/project/current') {
-          // Healthy global project with proper structure
+          // Global project with worktree="/"
           return { ok: true, json: async () => ({ id: 'global', worktree: '/', sandboxes: [], time: { created: 1 } }) };
         }
         return { ok: false };
       };
       
-      // Global servers (like OpenCode Desktop) should work as fallback
+      // Global servers should be skipped - pilot sessions should run isolated
       const result = await discoverOpencodeServer('/Users/test/random/path', { 
         getPorts: mockPorts,
         fetch: mockFetch
       });
       
-      assert.strictEqual(result, 'http://localhost:3000');
+      assert.strictEqual(result, null);
     });
 
     test('returns null when fetch fails for all servers', async () => {

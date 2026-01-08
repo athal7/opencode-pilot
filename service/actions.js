@@ -102,7 +102,10 @@ function isServerHealthy(project) {
  * 1. Exact sandbox match (highest priority)
  * 2. Exact worktree match
  * 3. Target is subdirectory of worktree
- * 4. Global project (worktree="/") as fallback (e.g., OpenCode Desktop)
+ * 
+ * NOTE: Global servers (worktree="/") are NOT used - sessions spawned via
+ * pilot should run in isolated mode rather than attach to the global project,
+ * since the global project doesn't have the right working directory context.
  * 
  * @param {string} targetDir - The directory we want to work in
  * @param {object} [options] - Options for testing/mocking
@@ -144,6 +147,12 @@ export async function discoverOpencodeServer(targetDir, options = {}) {
       
       const worktree = project.worktree || '/';
       const sandboxes = project.sandboxes || [];
+      
+      // Skip global servers - pilot sessions should run isolated
+      if (worktree === '/') {
+        debug(`discoverOpencodeServer: ${url} is global project, skipping`);
+        continue;
+      }
       
       const score = getPathMatchScore(targetDir, worktree, sandboxes);
       debug(`discoverOpencodeServer: ${url} worktree=${worktree} score=${score}`);
