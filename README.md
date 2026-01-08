@@ -94,6 +94,18 @@ opencode-pilot test-mapping MCP   # Test field mappings
 
 ## Known Issues
 
+### Sessions attached to global server run in wrong directory
+
+When using `server_port` to attach sessions to a global OpenCode server (e.g., OpenCode Desktop with worktree="/"), sessions are created in the server's working directory (typically home) instead of the project directory. This means:
+
+- File tools resolve paths relative to home, not the project
+- The agent sees the wrong `Working directory` in system prompt
+- Git operations may target the wrong repository
+
+**Workaround**: Don't set `server_port` in your config. Sessions will run in the correct directory but won't appear in OpenCode Desktop.
+
+**Upstream issue**: [anomalyco/opencode#7376](https://github.com/anomalyco/opencode/issues/7376)
+
 ### Working directory doesn't switch when templates create worktrees/devcontainers
 
 When a template instructs the agent to create a git worktree or switch to a devcontainer, OpenCode's internal working directory context (`Instance.directory`) doesn't update. This means:
