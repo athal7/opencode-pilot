@@ -100,6 +100,77 @@ describe('utils.js', () => {
       
       assert.strictEqual(hasNonBotFeedback(comments, 'contributor'), true);
     });
+
+    test('returns false when only approval-only reviews (no feedback body)', async () => {
+      const { hasNonBotFeedback } = await import('../../service/utils.js');
+      
+      // PR reviews with APPROVED state but no body should not trigger feedback
+      const comments = [
+        { user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'CI passed' },
+        { user: { login: 'reviewer', type: 'User' }, state: 'APPROVED', body: '' },
+      ];
+      
+      assert.strictEqual(hasNonBotFeedback(comments, 'author'), false);
+    });
+
+    test('returns true when approval includes feedback body', async () => {
+      const { hasNonBotFeedback } = await import('../../service/utils.js');
+      
+      // If someone approves but leaves feedback, we should consider it actionable
+      const comments = [
+        { user: { login: 'reviewer', type: 'User' }, state: 'APPROVED', body: 'LGTM but consider adding a test for edge cases' },
+      ];
+      
+      assert.strictEqual(hasNonBotFeedback(comments, 'author'), true);
+    });
+
+    test('returns true for CHANGES_REQUESTED reviews', async () => {
+      const { hasNonBotFeedback } = await import('../../service/utils.js');
+      
+      const comments = [
+        { user: { login: 'reviewer', type: 'User' }, state: 'CHANGES_REQUESTED', body: 'Please fix this' },
+      ];
+      
+      assert.strictEqual(hasNonBotFeedback(comments, 'author'), true);
+    });
+  });
+
+  describe('isApprovalOnly', () => {
+    test('returns true for APPROVED state with no body', async () => {
+      const { isApprovalOnly } = await import('../../service/utils.js');
+      
+      assert.strictEqual(isApprovalOnly({ state: 'APPROVED' }), true);
+      assert.strictEqual(isApprovalOnly({ state: 'APPROVED', body: '' }), true);
+      assert.strictEqual(isApprovalOnly({ state: 'APPROVED', body: null }), true);
+    });
+
+    test('returns false for APPROVED with substantive body', async () => {
+      const { isApprovalOnly } = await import('../../service/utils.js');
+      
+      // If someone approves but leaves feedback, we should still consider it feedback
+      assert.strictEqual(isApprovalOnly({ state: 'APPROVED', body: 'LGTM but consider renaming this function' }), false);
+    });
+
+    test('returns false for CHANGES_REQUESTED', async () => {
+      const { isApprovalOnly } = await import('../../service/utils.js');
+      
+      assert.strictEqual(isApprovalOnly({ state: 'CHANGES_REQUESTED', body: 'Please fix this' }), false);
+      assert.strictEqual(isApprovalOnly({ state: 'CHANGES_REQUESTED' }), false);
+    });
+
+    test('returns false for COMMENTED state', async () => {
+      const { isApprovalOnly } = await import('../../service/utils.js');
+      
+      assert.strictEqual(isApprovalOnly({ state: 'COMMENTED', body: 'This looks good' }), false);
+    });
+
+    test('returns false for regular comments without state', async () => {
+      const { isApprovalOnly } = await import('../../service/utils.js');
+      
+      // Issue comments don't have state field
+      assert.strictEqual(isApprovalOnly({ body: 'Please address this' }), false);
+      assert.strictEqual(isApprovalOnly({}), false);
+    });
   });
 
   describe('getNestedValue', () => {

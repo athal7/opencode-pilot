@@ -21,6 +21,26 @@ export function getNestedValue(obj, path) {
 }
 
 /**
+ * Check if a comment/review is an approval-only (no actionable feedback)
+ * 
+ * PR reviews have a state field (APPROVED, CHANGES_REQUESTED, COMMENTED).
+ * An approval without substantive body text doesn't require action from the author.
+ * 
+ * @param {object} comment - Comment or review object with optional state and body
+ * @returns {boolean} True if this is a pure approval with no actionable feedback
+ */
+export function isApprovalOnly(comment) {
+  // Only applies to PR reviews with APPROVED state
+  if (comment.state !== 'APPROVED') return false;
+  
+  // If there's substantive body text, it might contain feedback
+  const body = comment.body || '';
+  if (body.trim().length > 0) return false;
+  
+  return true;
+}
+
+/**
  * Check if a username represents a bot account
  * 
  * Detects bots by:
@@ -50,9 +70,12 @@ export function isBot(username, type) {
  * Used to filter out PRs where only bots have commented, since those don't
  * require the author's attention for human feedback.
  * 
+ * Also skips approval-only reviews (APPROVED state with no body text) since
+ * approvals don't require action from the author.
+ * 
  * @param {Array} comments - Array of comment objects with user.login and user.type
  * @param {string} authorUsername - Username of the PR/issue author
- * @returns {boolean} True if there's at least one non-bot, non-author comment
+ * @returns {boolean} True if there's at least one non-bot, non-author, actionable comment
  */
 export function hasNonBotFeedback(comments, authorUsername) {
   // Handle null/undefined/empty
@@ -75,7 +98,10 @@ export function hasNonBotFeedback(comments, authorUsername) {
     // Skip if it's the author themselves
     if (authorLower && username?.toLowerCase() === authorLower) continue;
     
-    // Found a non-bot, non-author comment
+    // Skip approval-only reviews (no actionable feedback)
+    if (isApprovalOnly(comment)) continue;
+    
+    // Found a non-bot, non-author, actionable comment
     return true;
   }
   
