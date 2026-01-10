@@ -67,15 +67,33 @@ export function applyMappings(item, mappings) {
 
 /**
  * Get tool configuration from a source
+ * Supports both MCP tools and CLI commands.
+ * 
  * @param {object} source - Source configuration from config.yaml
- * @returns {object} Tool configuration
+ * @returns {object} Tool configuration with type indicator
  */
 export function getToolConfig(source) {
-  if (!source.tool || !source.tool.mcp || !source.tool.name) {
-    throw new Error(`Source '${source.name || 'unknown'}' missing tool configuration (requires tool.mcp and tool.name)`);
+  if (!source.tool) {
+    throw new Error(`Source '${source.name || 'unknown'}' missing tool configuration`);
+  }
+
+  // CLI command support
+  if (source.tool.command) {
+    return {
+      type: 'cli',
+      command: source.tool.command,
+      args: source.args || {},
+      idTemplate: source.item?.id || null,
+    };
+  }
+
+  // MCP tool support (existing behavior)
+  if (!source.tool.mcp || !source.tool.name) {
+    throw new Error(`Source '${source.name || 'unknown'}' missing tool configuration (requires tool.mcp and tool.name, or tool.command)`);
   }
 
   return {
+    type: 'mcp',
     mcpServer: source.tool.mcp,
     toolName: source.tool.name,
     args: source.args || {},
@@ -214,7 +232,84 @@ function createTimeout(ms, operation) {
 }
 
 /**
- * Poll a source using MCP tools
+ * Execute a CLI command and return parsed JSON output
+ * 
+ * @param {string|string[]} command - Command to execute (string or array)
+ * @param {object} args - Arguments to substitute into command
+ * @param {number} timeout - Timeout in ms
+ * @returns {Promise<string>} Command output
+ */
+async function executeCliCommand(command, args, timeout) {
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+
+  // Build command string
+  let cmdStr;
+  if (Array.isArray(command)) {
+    // Substitute args into command array
+    const expandedCmd = command.map(part => {
+      if (typeof part === 'string' && part.startsWith('$')) {
+        const argName = part.slice(1);
+        return args[argName] !== undefined ? String(args[argName]) : part;
+      }
+      return part;
+    });
+    // Quote parts with spaces
+    cmdStr = expandedCmd.map(p => p.includes(' ') ? `"${p}"` : p).join(' ');
+  } else {
+    // String command - substitute ${argName} patterns
+    cmdStr = command.replace(/\$\{(\w+)\}/g, (_, name) => {
+      return args[name] !== undefined ? String(args[name]) : '';
+    });
+  }
+
+  const { stdout } = await Promise.race([
+    execAsync(cmdStr, { env: { ...process.env } }),
+    createTimeout(timeout, `CLI command: ${cmdStr.slice(0, 50)}...`),
+  ]);
+
+  return stdout;
+}
+
+/**
+ * Poll a source using CLI command
+ * 
+ * @param {object} source - Source configuration from config.yaml
+ * @param {object} toolConfig - Tool config from getToolConfig()
+ * @param {object} [options] - Additional options
+ * @param {number} [options.timeout] - Timeout in ms (default: 30000)
+ * @param {object} [options.toolProviderConfig] - Tool provider config (response_key, mappings)
+ * @returns {Promise<Array>} Array of items from the source with IDs and mappings applied
+ */
+async function pollCliSource(source, toolConfig, options = {}) {
+  const timeout = options.timeout || DEFAULT_MCP_TIMEOUT;
+  const toolProviderConfig = options.toolProviderConfig || {};
+  const responseKey = toolProviderConfig.response_key;
+  const mappings = toolProviderConfig.mappings || null;
+
+  try {
+    const output = await executeCliCommand(toolConfig.command, toolConfig.args, timeout);
+    
+    if (!output || !output.trim()) return [];
+
+    const rawItems = parseJsonArray(output, source.name, responseKey);
+
+    // Apply field mappings before transforming
+    const mappedItems = mappings
+      ? rawItems.map(item => applyMappings(item, mappings))
+      : rawItems;
+
+    // Transform items (add IDs)
+    return transformItems(mappedItems, toolConfig.idTemplate);
+  } catch (err) {
+    console.error(`[poller] CLI command failed for ${source.name}: ${err.message}`);
+    return [];
+  }
+}
+
+/**
+ * Poll a source using MCP tools or CLI commands
  * 
  * @param {object} source - Source configuration from config.yaml
  * @param {object} [options] - Additional options
@@ -225,6 +320,13 @@ function createTimeout(ms, operation) {
  */
 export async function pollGenericSource(source, options = {}) {
   const toolConfig = getToolConfig(source);
+
+  // Route to CLI handler if command-based
+  if (toolConfig.type === 'cli') {
+    return pollCliSource(source, toolConfig, options);
+  }
+
+  // MCP-based polling (existing behavior)
   const timeout = options.timeout || DEFAULT_MCP_TIMEOUT;
   const toolProviderConfig = options.toolProviderConfig || {};
   const responseKey = toolProviderConfig.response_key;

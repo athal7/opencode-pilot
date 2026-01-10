@@ -57,6 +57,60 @@ describe('poller.js', () => {
     });
   });
 
+  describe('getToolConfig', () => {
+    test('returns MCP config for mcp-based sources', async () => {
+      const { getToolConfig } = await import('../../service/poller.js');
+      
+      const source = {
+        name: 'test-source',
+        tool: { mcp: 'github', name: 'search_issues' },
+        args: { q: 'is:open' },
+        item: { id: '{html_url}' }
+      };
+      
+      const config = getToolConfig(source);
+      assert.strictEqual(config.type, 'mcp');
+      assert.strictEqual(config.mcpServer, 'github');
+      assert.strictEqual(config.toolName, 'search_issues');
+      assert.deepStrictEqual(config.args, { q: 'is:open' });
+      assert.strictEqual(config.idTemplate, '{html_url}');
+    });
+
+    test('returns CLI config for command-based sources', async () => {
+      const { getToolConfig } = await import('../../service/poller.js');
+      
+      const source = {
+        name: 'test-source',
+        tool: { command: ['granola-cli', 'meetings', 'list', '20'] },
+        item: { id: 'meeting:{id}' }
+      };
+      
+      const config = getToolConfig(source);
+      assert.strictEqual(config.type, 'cli');
+      assert.deepStrictEqual(config.command, ['granola-cli', 'meetings', 'list', '20']);
+      assert.strictEqual(config.idTemplate, 'meeting:{id}');
+    });
+
+    test('throws for sources missing tool config', async () => {
+      const { getToolConfig } = await import('../../service/poller.js');
+      
+      const source = { name: 'bad-source' };
+      
+      assert.throws(() => getToolConfig(source), /missing tool configuration/);
+    });
+
+    test('throws for mcp sources missing name', async () => {
+      const { getToolConfig } = await import('../../service/poller.js');
+      
+      const source = {
+        name: 'bad-source',
+        tool: { mcp: 'github' } // missing name
+      };
+      
+      assert.throws(() => getToolConfig(source), /missing tool configuration/);
+    });
+  });
+
   describe('createPoller', () => {
     test('creates poller with state tracking', async () => {
       const { createPoller } = await import('../../service/poller.js');
