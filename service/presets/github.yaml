@@ -1,11 +1,15 @@
-# GitHub source presets
+# GitHub source presets (using gh CLI)
+#
+# These presets use the `gh` CLI instead of requiring a GitHub MCP server.
+# The gh CLI must be installed and authenticated (gh auth login).
 
 # Provider-level config (applies to all GitHub presets)
 _provider:
-  response_key: items
   mappings:
-    # Extract repo full name from repository_url (e.g., "https://api.github.com/repos/owner/repo")
-    repository_full_name: "repository_url:/repos\\/([^/]+\\/[^/]+)$/"
+    # Map gh CLI fields to standard fields
+    html_url: url
+    repository_full_name: repository.nameWithOwner
+    updated_at: updatedAt
   # Reprocess items when state changes (e.g., reopened issues)
   # Note: updated_at is NOT included because our own changes would trigger reprocessing
   reprocess_on:
@@ -15,48 +19,35 @@ _provider:
 my-issues:
   name: my-issues
   tool:
-    mcp: github
-    name: search_issues
-  args:
-    q: "is:issue assignee:@me state:open"
+    command: ["gh", "search", "issues", "--assignee=@me", "--state=open", "--json", "number,title,url,repository,state,body,updatedAt"]
   item:
-    id: "{html_url}"
-  repo: "{repository_full_name}"
+    id: "{url}"
+  repo: "{repository.nameWithOwner}"
   session:
     name: "{title}"
 
 review-requests:
   name: review-requests
   tool:
-    mcp: github
-    name: search_issues
-  args:
-    q: "is:pr review-requested:@me state:open"
+    command: ["gh", "search", "prs", "--review-requested=@me", "--state=open", "--json", "number,title,url,repository,state,body,updatedAt"]
   item:
-    id: "{html_url}"
-  repo: "{repository_full_name}"
+    id: "{url}"
+  repo: "{repository.nameWithOwner}"
   session:
     name: "Review: {title}"
 
 my-prs-feedback:
   name: my-prs-feedback
   tool:
-    mcp: github
-    name: search_issues
-  args:
-    # Catches PRs with any review activity (comments, reviews, or changes requested)
-    # Note: comments:>0 includes both review comments and issue comments
-    q: "is:pr author:@me state:open comments:>0"
+    # comments:>0 filter ensures only PRs with feedback are returned
+    command: ["gh", "search", "prs", "--author=@me", "--state=open", "comments:>0", "--json", "number,title,url,repository,state,body,updatedAt"]
   item:
-    id: "{html_url}"
-  repo: "{repository_full_name}"
+    id: "{url}"
+  repo: "{repository.nameWithOwner}"
   session:
     name: "Feedback: {title}"
   # Reprocess when PR is updated (new commits pushed, new comments, etc.)
   # This ensures we re-trigger after addressing review feedback
   reprocess_on:
     - state
-    - updated_at
-  # Filter out PRs where all comments are from bots or the PR author
-  # Fetches comments via API and enriches items with _comments for readiness check
-  filter_bot_comments: true
+    - updatedAt

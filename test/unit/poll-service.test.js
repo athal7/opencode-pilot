@@ -159,15 +159,15 @@ sources:
       loadRepoConfig(configPath);
       
       const source = getSources()[0];
-      // Item with repository_full_name (mapped from repository_url by GitHub provider)
+      // Item with repository.nameWithOwner (gh CLI output format)
       const item = { 
-        repository_full_name: 'myorg/backend',
+        repository: { nameWithOwner: 'myorg/backend' },
         number: 123,
-        html_url: 'https://github.com/myorg/backend/issues/123'
+        url: 'https://github.com/myorg/backend/issues/123'
       };
       
-      // Source should have repo field from preset (uses mapped field)
-      assert.strictEqual(source.repo, '{repository_full_name}');
+      // Source should have repo field from preset (uses gh CLI field)
+      assert.strictEqual(source.repo, '{repository.nameWithOwner}');
       
       // resolveRepoForItem should extract repo key from item
       const repoKeys = resolveRepoForItem(source, item);
@@ -195,9 +195,9 @@ sources:
       loadRepoConfig(configPath);
       
       const source = getSources()[0];
-      // Item with repository_full_name (mapped from repository_url by GitHub provider)
+      // Item with repository.nameWithOwner (gh CLI output format)
       const item = { 
-        repository_full_name: 'unknown/repo',
+        repository: { nameWithOwner: 'unknown/repo' },
         number: 456
       };
       

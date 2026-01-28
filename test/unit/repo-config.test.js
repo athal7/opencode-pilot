@@ -340,7 +340,7 @@ sources: []
 tools:
   github:
     mappings:
-      url: html_url
+      custom_field: some_source
 
 sources: []
 `);
@@ -350,10 +350,11 @@ sources: []
       
       const toolConfig = getToolProviderConfig('github');
       
-      // GitHub preset has response_key: items, user config doesn't override it
-      assert.strictEqual(toolConfig.response_key, 'items');
-      // GitHub provider has mapping for repository_full_name extraction from URL
-      assert.strictEqual(toolConfig.mappings.url, 'html_url');
+      // GitHub preset now uses gh CLI and doesn't need response_key
+      // User config custom_field should be merged with preset mappings
+      assert.strictEqual(toolConfig.mappings.custom_field, 'some_source');
+      // GitHub provider has mappings for gh CLI field normalization
+      assert.ok(toolConfig.mappings.html_url, 'Should have html_url mapping');
       assert.ok(toolConfig.mappings.repository_full_name, 'Should have repository_full_name mapping');
     });
 
@@ -534,9 +535,10 @@ sources:
 
       assert.strictEqual(sources.length, 1);
       assert.strictEqual(sources[0].name, 'my-issues');
-      assert.deepStrictEqual(sources[0].tool, { mcp: 'github', name: 'search_issues' });
-      assert.strictEqual(sources[0].args.q, 'is:issue assignee:@me state:open');
-      assert.strictEqual(sources[0].item.id, '{html_url}');
+      // GitHub presets now use gh CLI instead of MCP
+      assert.ok(Array.isArray(sources[0].tool.command), 'tool.command should be an array');
+      assert.ok(sources[0].tool.command.includes('gh'), 'command should use gh CLI');
+      assert.strictEqual(sources[0].item.id, '{url}');
       assert.strictEqual(sources[0].prompt, 'worktree');
     });
 
@@ -551,7 +553,8 @@ sources:
       const sources = getSources();
 
       assert.strictEqual(sources[0].name, 'review-requests');
-      assert.strictEqual(sources[0].args.q, 'is:pr review-requested:@me state:open');
+      // GitHub presets now use gh CLI instead of MCP
+      assert.ok(sources[0].tool.command.includes('--review-requested=@me'), 'command should include review-requested filter');
     });
 
     test('expands github/my-prs-feedback preset', async () => {
@@ -565,9 +568,11 @@ sources:
       const sources = getSources();
 
       assert.strictEqual(sources[0].name, 'my-prs-feedback');
-      assert.strictEqual(sources[0].args.q, 'is:pr author:@me state:open comments:>0');
-      // This preset includes updated_at in reprocess_on to catch new commits
-      assert.deepStrictEqual(sources[0].reprocess_on, ['state', 'updated_at']);
+      // GitHub presets now use gh CLI instead of MCP
+      assert.ok(sources[0].tool.command.includes('--author=@me'), 'command should include author filter');
+      assert.ok(sources[0].tool.command.includes('comments:>0'), 'command should filter for PRs with comments');
+      // This preset includes updatedAt in reprocess_on to catch new commits
+      assert.deepStrictEqual(sources[0].reprocess_on, ['state', 'updatedAt']);
     });
 
     test('expands linear/my-issues preset with required args', async () => {
@@ -632,12 +637,12 @@ sources:
       loadRepoConfig(configPath);
       const sources = getSources();
 
-      // All GitHub presets should have repo field that references repository_full_name
-      // (which is mapped from repository_url by the GitHub provider)
-      const mockItem = { repository_full_name: 'myorg/backend' };
+      // All GitHub presets should have repo field that references repository.nameWithOwner
+      // (gh CLI returns this field directly)
+      const mockItem = { repository: { nameWithOwner: 'myorg/backend' } };
       
       for (const source of sources) {
-        assert.strictEqual(source.repo, '{repository_full_name}', `Preset ${source.name} should have repo field`);
+        assert.strictEqual(source.repo, '{repository.nameWithOwner}', `Preset ${source.name} should have repo field`);
         const repos = resolveRepoForItem(source, mockItem);
         assert.deepStrictEqual(repos, ['myorg/backend'], `Preset ${source.name} should resolve repo from item`);
       }
@@ -656,12 +661,12 @@ sources:
       loadRepoConfig(configPath);
       const source = getSources()[0];
 
-      // Item from allowed repo should resolve (repository_full_name is mapped from repository_url)
-      const allowedItem = { repository_full_name: 'myorg/backend' };
+      // Item from allowed repo should resolve (gh CLI returns repository.nameWithOwner)
+      const allowedItem = { repository: { nameWithOwner: 'myorg/backend' } };
       assert.deepStrictEqual(resolveRepoForItem(source, allowedItem), ['myorg/backend']);
 
       // Item from non-allowed repo should return empty (filtered out)
-      const filteredItem = { repository_full_name: 'other/repo' };
+      const filteredItem = { repository: { nameWithOwner: 'other/repo' } };
       assert.deepStrictEqual(resolveRepoForItem(source, filteredItem), []);
     });
 

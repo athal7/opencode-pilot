@@ -255,8 +255,9 @@ async function executeCliCommand(command, args, timeout) {
       }
       return part;
     });
-    // Quote parts with spaces
-    cmdStr = expandedCmd.map(p => p.includes(' ') ? `"${p}"` : p).join(' ');
+    // Quote parts with spaces or shell special characters
+    const shellSpecialChars = /[ <>|&;$`"'\\!*?#~=\[\]{}()]/;
+    cmdStr = expandedCmd.map(p => shellSpecialChars.test(p) ? `"${p.replace(/"/g, '\\"')}"` : p).join(' ');
   } else {
     // String command - substitute ${argName} patterns
     cmdStr = command.replace(/\$\{(\w+)\}/g, (_, name) => {
