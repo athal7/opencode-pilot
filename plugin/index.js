@@ -10,7 +10,7 @@ import { homedir } from 'os'
 import YAML from 'yaml'
 
 const DEFAULT_PORT = 4097
-const CONFIG_PATH = join(homedir(), '.config', 'opencode-pilot', 'config.yaml')
+const CONFIG_PATH = join(homedir(), '.config', 'opencode', 'pilot', 'config.yaml')
 
 /**
  * Load port from config file

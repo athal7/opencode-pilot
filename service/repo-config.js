@@ -1,7 +1,7 @@
 /**
  * repo-config.js - Configuration management
  *
- * Manages configuration stored in ~/.config/opencode-pilot/config.yaml
+ * Manages configuration stored in ~/.config/opencode/pilot/config.yaml
  * Supports:
  * - defaults: default values applied to all sources
  * - repos: per-repository settings (use YAML anchors for sharing)

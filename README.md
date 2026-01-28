@@ -106,20 +106,6 @@ When using `server_port` to attach sessions to a global OpenCode server (e.g., O
 
 **Upstream issue**: [anomalyco/opencode#7376](https://github.com/anomalyco/opencode/issues/7376)
 
-### Working directory doesn't switch when templates create worktrees/devcontainers
-
-When a template instructs the agent to create a git worktree or switch to a devcontainer, OpenCode's internal working directory context (`Instance.directory`) doesn't update. This means:
-
-- The "Session changes" panel shows diffs from the original directory
-- File tools may resolve paths relative to the wrong location
-- The agent works in the new directory, but OpenCode doesn't follow
-
-**Workaround**: Start OpenCode directly in the target directory, or use separate terminal sessions.
-
-**Upstream issue**: [anomalyco/opencode#6697](https://github.com/anomalyco/opencode/issues/6697)
-
-**Related**: [opencode-devcontainers#103](https://github.com/athal7/opencode-devcontainers/issues/103)
-
 ## Related
 
 - [opencode-devcontainers](https://github.com/athal7/opencode-devcontainers) - Run multiple devcontainer instances for OpenCode

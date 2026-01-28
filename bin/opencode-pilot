@@ -39,8 +39,8 @@ function findServiceDir() {
 const serviceDir = findServiceDir();
 
 // Paths
-const PILOT_CONFIG_FILE = join(os.homedir(), ".config/opencode-pilot/config.yaml");
-const PILOT_TEMPLATES_DIR = join(os.homedir(), ".config/opencode-pilot/templates");
+const PILOT_CONFIG_FILE = join(os.homedir(), ".config/opencode/pilot/config.yaml");
+const PILOT_TEMPLATES_DIR = join(os.homedir(), ".config/opencode/pilot/templates");
 
 // Default port
 const DEFAULT_PORT = 4097;
@@ -231,7 +231,7 @@ async function configCommand() {
     console.log(`Config file not found: ${PILOT_CONFIG_FILE}`);
     console.log("");
     console.log("Create one by copying the example:");
-    console.log("  cp node_modules/opencode-pilot/examples/config.yaml ~/.config/opencode-pilot/config.yaml");
+    console.log("  cp node_modules/opencode-pilot/examples/config.yaml ~/.config/opencode/pilot/config.yaml");
     process.exit(1);
   }
 
@@ -666,7 +666,7 @@ async function clearCommand(flags) {
       // No flags - show current state summary
       console.log("Poll state summary:");
       console.log(`  Total entries: ${beforeCount}`);
-      console.log(`  State file: ~/.config/opencode-pilot/poll-state.json`);
+      console.log(`  State file: ~/.config/opencode/pilot/poll-state.json`);
       console.log("");
       console.log("Usage:");
       console.log("  opencode-pilot clear --all           Clear all entries");
