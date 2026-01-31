@@ -295,16 +295,19 @@ async function configCommand() {
       const name = source.name || "<unnamed>";
       const tool = source.tool;
       
-      if (!tool || !tool.mcp || !tool.name) {
-        console.log(`  ✗ ${name}: missing tool.mcp or tool.name`);
+      if (!tool || (!tool.command && (!tool.mcp || !tool.name))) {
+        console.log(`  ✗ ${name}: missing tool.command or tool.mcp/tool.name`);
         continue;
       }
       
+      const toolDesc = tool.command 
+        ? `cli: ${Array.isArray(tool.command) ? tool.command[0] : tool.command.split(' ')[0]}`
+        : `${tool.mcp}/${tool.name}`;
       const itemId = source.item?.id;
       if (!itemId) {
-        console.log(`  ⚠ ${name}: ${tool.mcp}/${tool.name} (no item.id template)`);
+        console.log(`  ⚠ ${name}: ${toolDesc} (no item.id template)`);
       } else {
-        console.log(`  ✓ ${name}: ${tool.mcp}/${tool.name}`);
+        console.log(`  ✓ ${name}: ${toolDesc}`);
       }
       
       // Show prompt and agent
