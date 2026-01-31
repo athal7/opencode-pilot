@@ -61,6 +61,11 @@ export function isBot(username, type) {
   // Check for [bot] suffix in username
   if (username.toLowerCase().endsWith("[bot]")) return true;
   
+  // Known bot usernames without [bot] suffix
+  // Note: 'Copilot' is intentionally NOT included - Copilot review feedback is actionable
+  const knownBots = ['linear'];
+  if (knownBots.includes(username.toLowerCase())) return true;
+  
   return false;
 }
 
