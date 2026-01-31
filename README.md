@@ -96,7 +96,7 @@ opencode-pilot test-mapping MCP   # Test field mappings
 
 None currently! Previous issues have been resolved:
 
-- ~~Sessions attached to global server run in wrong directory~~ - Fixed in v0.14.0 by using the HTTP API with `?directory=` parameter instead of `opencode run --attach`
+- ~~Sessions attached to global server run in wrong directory~~ - Fixed by using the HTTP API with `?directory=` parameter instead of `opencode run --attach`
 
 ## Related
 
