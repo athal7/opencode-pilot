@@ -68,11 +68,15 @@ function parseGitHubRepo(url) {
 function discoverRepos(reposDir) {
   const discovered = new Map();
   
-  if (!reposDir || !fs.existsSync(reposDir)) {
+  if (!reposDir) {
     return discovered;
   }
   
   const normalizedDir = reposDir.replace(/^~/, os.homedir());
+  
+  if (!fs.existsSync(normalizedDir)) {
+    return discovered;
+  }
   
   try {
     const entries = fs.readdirSync(normalizedDir, { withFileTypes: true });
