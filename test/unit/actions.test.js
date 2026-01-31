@@ -571,6 +571,128 @@ describe('actions.js', () => {
       assert.ok(!result.command.includes('--attach'), 'Command should not include --attach flag');
       assert.ok(result.command.includes('opencode run'), 'Command should include opencode run');
     });
+
+    test('creates new worktree when worktree: "new" is configured (dry run)', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      
+      const item = { number: 123, title: 'Fix bug' };
+      const config = {
+        path: tempDir,
+        prompt: 'default',
+        worktree: 'new',
+        worktree_name: 'feature-branch'
+      };
+      
+      // Mock server discovery
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      
+      // Mock worktree creation via fetch
+      const mockFetch = async (url, opts) => {
+        // Worktree creation endpoint
+        if (url === 'http://localhost:4096/experimental/worktree' && opts?.method === 'POST') {
+          const body = JSON.parse(opts.body);
+          assert.strictEqual(body.name, 'feature-branch', 'Should pass worktree name');
+          return {
+            ok: true,
+            json: async () => ({
+              name: 'feature-branch',
+              branch: 'opencode/feature-branch',
+              directory: '/data/worktree/proj123/feature-branch'
+            })
+          };
+        }
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await executeAction(item, config, { 
+        dryRun: true,
+        discoverServer: mockDiscoverServer,
+        fetch: mockFetch
+      });
+      
+      assert.ok(result.dryRun);
+      assert.strictEqual(result.method, 'api', 'Should use API method');
+      // The directory in the command should be the worktree directory
+      assert.ok(result.command.includes('/data/worktree/proj123/feature-branch'), 
+        'Should use worktree directory in command');
+    });
+
+    test('uses existing worktree by name (dry run)', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      
+      const item = { number: 123, title: 'Fix bug' };
+      const config = {
+        path: tempDir,
+        prompt: 'default',
+        worktree: 'my-feature'
+      };
+      
+      // Mock server discovery
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      
+      // Mock worktree list lookup
+      const mockFetch = async (url) => {
+        if (url === 'http://localhost:4096/experimental/worktree') {
+          return {
+            ok: true,
+            json: async () => [
+              '/data/worktree/proj123/other-branch',
+              '/data/worktree/proj123/my-feature'
+            ]
+          };
+        }
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await executeAction(item, config, { 
+        dryRun: true,
+        discoverServer: mockDiscoverServer,
+        fetch: mockFetch
+      });
+      
+      assert.ok(result.dryRun);
+      assert.strictEqual(result.method, 'api', 'Should use API method');
+      assert.ok(result.command.includes('/data/worktree/proj123/my-feature'), 
+        'Should use looked up worktree path in command');
+    });
+
+    test('falls back to base directory when worktree creation fails (dry run)', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      
+      const item = { number: 123, title: 'Fix bug' };
+      const config = {
+        path: tempDir,
+        prompt: 'default',
+        worktree: 'new'
+      };
+      
+      // Mock server discovery
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      
+      // Mock worktree creation failure
+      const mockFetch = async (url, opts) => {
+        if (url === 'http://localhost:4096/experimental/worktree' && opts?.method === 'POST') {
+          return {
+            ok: false,
+            status: 500,
+            text: async () => 'Internal server error'
+          };
+        }
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await executeAction(item, config, { 
+        dryRun: true,
+        discoverServer: mockDiscoverServer,
+        fetch: mockFetch
+      });
+      
+      assert.ok(result.dryRun);
+      assert.strictEqual(result.method, 'api', 'Should still use API method');
+      // Should fall back to base directory
+      assert.ok(result.command.includes(tempDir), 
+        'Should fall back to base directory when worktree creation fails');
+    });
   });
 
   describe('createSessionViaApi', () => {

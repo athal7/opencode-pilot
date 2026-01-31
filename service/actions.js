@@ -10,6 +10,7 @@ import { readFileSync, existsSync } from "fs";
 import { debug } from "./logger.js";
 import { getNestedValue } from "./utils.js";
 import { getServerPort } from "./repo-config.js";
+import { resolveWorktreeDirectory } from "./worktree.js";
 import path from "path";
 import os from "os";
 
@@ -560,15 +561,40 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
  * @returns {Promise<object>} Result with command, stdout, stderr, exitCode
  */
 export async function executeAction(item, config, options = {}) {
-  // Get working directory first to determine which server to attach to
+  // Get base working directory first to determine which server to attach to
   const workingDir = config.working_dir || config.path || config.repo_path || "~";
-  const cwd = expandPath(workingDir);
+  const baseCwd = expandPath(workingDir);
   
   // Discover running opencode server for this directory
   const discoverFn = options.discoverServer || discoverOpencodeServer;
-  const serverUrl = await discoverFn(cwd);
+  const serverUrl = await discoverFn(baseCwd);
   
-  debug(`executeAction: discovered server=${serverUrl} for cwd=${cwd}`);
+  debug(`executeAction: discovered server=${serverUrl} for baseCwd=${baseCwd}`);
+  
+  // Resolve worktree directory if configured
+  // This allows creating sessions in isolated worktrees instead of the main project
+  const worktreeConfig = {
+    worktree: config.worktree,
+    // Expand worktree_name template with item fields (e.g., "issue-{number}")
+    worktreeName: config.worktree_name ? expandTemplate(config.worktree_name, item) : undefined,
+  };
+  
+  const worktreeResult = await resolveWorktreeDirectory(
+    serverUrl,
+    baseCwd,
+    worktreeConfig,
+    { fetch: options.fetch }
+  );
+  
+  const cwd = expandPath(worktreeResult.directory);
+  
+  if (worktreeResult.worktreeCreated) {
+    debug(`executeAction: created new worktree at ${cwd}`);
+  } else if (worktreeResult.error) {
+    debug(`executeAction: worktree resolution warning - ${worktreeResult.error}`);
+  }
+  
+  debug(`executeAction: using cwd=${cwd}`);
   
   // If a server is running, use the HTTP API to create the session
   // This is a workaround for the known issue where --attach doesn't support --dir

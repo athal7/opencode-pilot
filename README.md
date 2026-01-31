@@ -70,6 +70,27 @@ Three ways to configure sources, from simplest to most flexible:
 
 Create prompt templates as markdown files in `~/.config/opencode/pilot/templates/`. Templates support placeholders like `{title}`, `{body}`, `{number}`, `{html_url}`, etc.
 
+### Worktree Support
+
+Run sessions in isolated git worktrees instead of the main project directory. This uses OpenCode's built-in worktree management API to create and manage worktrees.
+
+```yaml
+sources:
+  - preset: github/my-issues
+    # Create a fresh worktree for each session
+    worktree: "new"
+    worktree_name: "issue-{number}"  # Optional: name template
+    
+  - preset: linear/my-issues
+    # Use an existing worktree by name
+    worktree: "my-feature-branch"
+```
+
+**Options:**
+- `worktree: "new"` - Create a new worktree via OpenCode's API
+- `worktree: "name"` - Look up existing worktree by name from project sandboxes
+- `worktree_name` - Template for naming new worktrees (only with `worktree: "new"`)
+
 ## CLI Commands
 
 ```bash

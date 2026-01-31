@@ -33,6 +33,16 @@ sources:
     working_dir: ~/code/myproject
     prompt: worktree
 
+  # Example with worktree support - run each issue in a fresh git worktree
+  # - preset: github/my-issues
+  #   worktree: "new"                    # Create a new worktree per session
+  #   worktree_name: "issue-{number}"    # Name template for new worktrees
+  #   prompt: worktree
+  
+  # Use an existing worktree by name
+  # - preset: github/review-requests
+  #   worktree: "review-worktree"        # Must exist in project sandboxes
+
   # GitHub shorthand syntax
   # - name: urgent-issues
   #   github: "is:issue assignee:@me label:urgent state:open"
