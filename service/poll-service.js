@@ -22,11 +22,12 @@ const DEFAULT_POLL_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Check if a source has tool configuration
+ * @see getToolConfig in poller.js for actual tool config resolution
  * @param {object} source - Source configuration
- * @returns {boolean} True if source has tool.mcp and tool.name
+ * @returns {boolean} True if source has tool.command or (tool.mcp and tool.name)
  */
 export function hasToolConfig(source) {
-  return !!(source.tool && source.tool.mcp && source.tool.name);
+  return !!(source.tool && (source.tool.command || (source.tool.mcp && source.tool.name)));
 }
 
 /**
@@ -113,7 +114,7 @@ export async function pollOnce(options = {}) {
     const sourceName = source.name || 'unknown';
 
     if (!hasToolConfig(source)) {
-      console.error(`[poll] Source '${sourceName}' missing tool configuration (requires tool.mcp and tool.name)`);
+      console.error(`[poll] Source '${sourceName}' missing tool configuration (requires tool.command or tool.mcp and tool.name)`);
       continue;
     }
 

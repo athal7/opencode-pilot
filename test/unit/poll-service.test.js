@@ -50,23 +50,39 @@ sources:
     test('hasToolConfig validates source configuration', async () => {
       const { hasToolConfig } = await import('../../service/poll-service.js');
       
-      // Valid config
-      const valid = {
+      // Valid MCP config
+      const validMcp = {
         name: 'test',
         tool: { mcp: 'github', name: 'search_issues' },
         args: {}
       };
-      assert.strictEqual(hasToolConfig(valid), true);
+      assert.strictEqual(hasToolConfig(validMcp), true);
+      
+      // Valid CLI command config
+      const validCli = {
+        name: 'test',
+        tool: { command: ['gh', 'search', 'issues'] },
+        args: {}
+      };
+      assert.strictEqual(hasToolConfig(validCli), true);
+      
+      // Valid CLI command config (string form)
+      const validCliString = {
+        name: 'test',
+        tool: { command: 'gh search issues' },
+        args: {}
+      };
+      assert.strictEqual(hasToolConfig(validCliString), true);
       
       // Missing tool
       const missingTool = { name: 'test' };
       assert.strictEqual(hasToolConfig(missingTool), false);
       
-      // Missing mcp
+      // Missing mcp (and no command)
       const missingMcp = { name: 'test', tool: { name: 'search_issues' } };
       assert.strictEqual(hasToolConfig(missingMcp), false);
       
-      // Missing tool.name
+      // Missing tool.name (and no command)
       const missingName = { name: 'test', tool: { mcp: 'github' } };
       assert.strictEqual(hasToolConfig(missingName), false);
     });
