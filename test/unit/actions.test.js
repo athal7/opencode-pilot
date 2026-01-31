@@ -525,7 +525,7 @@ describe('actions.js', () => {
   });
 
   describe('executeAction', () => {
-    test('discovers server and includes --attach in dry run', async () => {
+    test('uses HTTP API when server is discovered (dry run)', async () => {
       const { executeAction } = await import('../../service/actions.js');
       
       const item = { number: 123, title: 'Fix bug' };
@@ -543,11 +543,13 @@ describe('actions.js', () => {
       });
       
       assert.ok(result.dryRun);
-      assert.ok(result.command.includes('--attach'), 'Command should include --attach flag');
+      assert.strictEqual(result.method, 'api', 'Should use API method when server found');
+      assert.ok(result.command.includes('POST'), 'Command should show POST request');
       assert.ok(result.command.includes('http://localhost:4096'), 'Command should include server URL');
+      assert.ok(result.command.includes('directory='), 'Command should include directory param');
     });
 
-    test('does not include --attach when no server discovered', async () => {
+    test('falls back to spawn when no server discovered (dry run)', async () => {
       const { executeAction } = await import('../../service/actions.js');
       
       const item = { number: 123, title: 'Fix bug' };
@@ -565,7 +567,130 @@ describe('actions.js', () => {
       });
       
       assert.ok(result.dryRun);
+      assert.strictEqual(result.method, 'spawn', 'Should use spawn method when no server');
       assert.ok(!result.command.includes('--attach'), 'Command should not include --attach flag');
+      assert.ok(result.command.includes('opencode run'), 'Command should include opencode run');
+    });
+  });
+
+  describe('createSessionViaApi', () => {
+    test('creates session and sends message with directory param', async () => {
+      const { createSessionViaApi } = await import('../../service/actions.js');
+      
+      const mockSessionId = 'ses_test123';
+      let createCalled = false;
+      let messageCalled = false;
+      let createUrl = null;
+      let messageUrl = null;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        if (urlObj.pathname === '/session' && opts?.method === 'POST') {
+          createCalled = true;
+          createUrl = url;
+          return {
+            ok: true,
+            json: async () => ({ id: mockSessionId }),
+          };
+        }
+        
+        if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
+          messageCalled = true;
+          messageUrl = url;
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await createSessionViaApi(
+        'http://localhost:4096',
+        '/path/to/project',
+        'Fix the bug',
+        { fetch: mockFetch }
+      );
+      
+      assert.ok(result.success, 'Should succeed');
+      assert.strictEqual(result.sessionId, mockSessionId, 'Should return session ID');
+      assert.ok(createCalled, 'Should call create session endpoint');
+      assert.ok(messageCalled, 'Should call message endpoint');
+      // URL encodes slashes as %2F
+      assert.ok(createUrl.includes('directory='), 'Create URL should include directory param');
+      assert.ok(createUrl.includes('%2Fpath%2Fto%2Fproject'), 'Create URL should include encoded directory path');
+      assert.ok(messageUrl.includes('directory='), 'Message URL should include directory param');
+      assert.ok(messageUrl.includes('%2Fpath%2Fto%2Fproject'), 'Message URL should include encoded directory path');
+    });
+
+    test('handles session creation failure', async () => {
+      const { createSessionViaApi } = await import('../../service/actions.js');
+      
+      const mockFetch = async () => ({
+        ok: false,
+        status: 500,
+        text: async () => 'Internal server error',
+      });
+      
+      const result = await createSessionViaApi(
+        'http://localhost:4096',
+        '/path/to/project',
+        'Fix the bug',
+        { fetch: mockFetch }
+      );
+      
+      assert.ok(!result.success, 'Should fail');
+      assert.ok(result.error.includes('Failed to create session'), 'Should include error message');
+    });
+
+    test('passes agent and model options', async () => {
+      const { createSessionViaApi } = await import('../../service/actions.js');
+      
+      let messageBody = null;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        if (urlObj.pathname === '/session' && opts?.method === 'POST') {
+          return {
+            ok: true,
+            json: async () => ({ id: 'ses_test' }),
+          };
+        }
+        
+        if (urlObj.pathname.includes('/message')) {
+          messageBody = JSON.parse(opts.body);
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        // PATCH for title update
+        if (opts?.method === 'PATCH') {
+          return { ok: true, json: async () => ({}) };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      await createSessionViaApi(
+        'http://localhost:4096',
+        '/path/to/project',
+        'Fix the bug',
+        { 
+          fetch: mockFetch,
+          agent: 'code',
+          model: 'anthropic/claude-sonnet-4-20250514',
+          title: 'Test Session',
+        }
+      );
+      
+      assert.strictEqual(messageBody.agent, 'code', 'Should pass agent');
+      assert.strictEqual(messageBody.providerID, 'anthropic', 'Should parse provider from model');
+      assert.strictEqual(messageBody.modelID, 'claude-sonnet-4-20250514', 'Should parse model ID');
     });
   });
 });

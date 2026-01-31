@@ -450,12 +450,113 @@ function runSpawn(args, options = {}) {
 }
 
 /**
+ * Create a session via the OpenCode HTTP API
+ * 
+ * This is a workaround for the known issue where `opencode run --attach` 
+ * doesn't support a --dir flag, causing sessions to run in the wrong directory
+ * when attached to a global server.
+ * 
+ * @param {string} serverUrl - Server URL (e.g., "http://localhost:4096")
+ * @param {string} directory - Working directory for the session
+ * @param {string} prompt - The prompt/message to send
+ * @param {object} [options] - Options
+ * @param {string} [options.title] - Session title
+ * @param {string} [options.agent] - Agent to use
+ * @param {string} [options.model] - Model to use
+ * @param {function} [options.fetch] - Custom fetch function (for testing)
+ * @returns {Promise<object>} Result with sessionId, success, error
+ */
+export async function createSessionViaApi(serverUrl, directory, prompt, options = {}) {
+  const fetchFn = options.fetch || fetch;
+  
+  try {
+    // Step 1: Create a new session with the directory parameter
+    const sessionUrl = new URL('/session', serverUrl);
+    sessionUrl.searchParams.set('directory', directory);
+    
+    const createResponse = await fetchFn(sessionUrl.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    
+    if (!createResponse.ok) {
+      const errorText = await createResponse.text();
+      throw new Error(`Failed to create session: ${createResponse.status} ${errorText}`);
+    }
+    
+    const session = await createResponse.json();
+    debug(`createSessionViaApi: created session ${session.id} in ${directory}`);
+    
+    // Step 2: Update session title if provided
+    if (options.title) {
+      const updateUrl = new URL(`/session/${session.id}`, serverUrl);
+      updateUrl.searchParams.set('directory', directory);
+      await fetchFn(updateUrl.toString(), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: options.title }),
+      });
+    }
+    
+    // Step 3: Send the initial message
+    const messageUrl = new URL(`/session/${session.id}/message`, serverUrl);
+    messageUrl.searchParams.set('directory', directory);
+    
+    // Build message body
+    const messageBody = {
+      parts: [{ type: 'text', text: prompt }],
+    };
+    
+    // Add agent if specified
+    if (options.agent) {
+      messageBody.agent = options.agent;
+    }
+    
+    // Add model if specified (format: provider/model)
+    if (options.model) {
+      const [providerID, modelID] = options.model.includes('/') 
+        ? options.model.split('/', 2) 
+        : ['anthropic', options.model];
+      messageBody.providerID = providerID;
+      messageBody.modelID = modelID;
+    }
+    
+    const messageResponse = await fetchFn(messageUrl.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(messageBody),
+    });
+    
+    if (!messageResponse.ok) {
+      const errorText = await messageResponse.text();
+      throw new Error(`Failed to send message: ${messageResponse.status} ${errorText}`);
+    }
+    
+    debug(`createSessionViaApi: sent message to session ${session.id}`);
+    
+    return {
+      success: true,
+      sessionId: session.id,
+      directory,
+    };
+  } catch (err) {
+    debug(`createSessionViaApi: error - ${err.message}`);
+    return {
+      success: false,
+      error: err.message,
+    };
+  }
+}
+
+/**
  * Execute an action
  * @param {object} item - Item to create session for
  * @param {object} config - Repo config with action settings
  * @param {object} [options] - Execution options
  * @param {boolean} [options.dryRun] - If true, return command without executing
  * @param {function} [options.discoverServer] - Custom server discovery function (for testing)
+ * @param {function} [options.fetch] - Custom fetch function (for testing)
  * @returns {Promise<object>} Result with command, stdout, stderr, exitCode
  */
 export async function executeAction(item, config, options = {}) {
@@ -469,8 +570,48 @@ export async function executeAction(item, config, options = {}) {
   
   debug(`executeAction: discovered server=${serverUrl} for cwd=${cwd}`);
   
-  // Build command info with server URL for --attach flag
-  const cmdInfo = getCommandInfoNew(item, config, undefined, serverUrl);
+  // If a server is running, use the HTTP API to create the session
+  // This is a workaround for the known issue where --attach doesn't support --dir
+  // See: https://github.com/anomalyco/opencode/issues/7376
+  if (serverUrl) {
+    // Build prompt from template
+    const prompt = buildPromptFromTemplate(config.prompt || "default", item);
+    
+    // Build session title
+    const sessionTitle = config.session?.name
+      ? buildSessionName(config.session.name, item)
+      : (item.title || `session-${Date.now()}`);
+    
+    const apiCommand = `[API] POST ${serverUrl}/session?directory=${cwd}`;
+    debug(`executeAction: using HTTP API - ${apiCommand}`);
+    
+    if (options.dryRun) {
+      return {
+        command: apiCommand,
+        dryRun: true,
+        method: 'api',
+      };
+    }
+    
+    const result = await createSessionViaApi(serverUrl, cwd, prompt, {
+      title: sessionTitle,
+      agent: config.agent,
+      model: config.model,
+      fetch: options.fetch,
+    });
+    
+    return {
+      command: apiCommand,
+      success: result.success,
+      sessionId: result.sessionId,
+      error: result.error,
+      method: 'api',
+    };
+  }
+  
+  // No server running - fall back to spawning opencode run
+  // This works correctly because we set cwd on the spawn
+  const cmdInfo = getCommandInfoNew(item, config, undefined, null);
   
   // Build command string for display
   const quoteArgs = (args) => args.map(a => 
@@ -486,6 +627,7 @@ export async function executeAction(item, config, options = {}) {
     return {
       command,
       dryRun: true,
+      method: 'spawn',
     };
   }
 
@@ -505,6 +647,7 @@ export async function executeAction(item, config, options = {}) {
     command,
     success: true,
     pid: child.pid,
+    method: 'spawn',
   };
 }
 
