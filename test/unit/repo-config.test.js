@@ -7,6 +7,7 @@ import assert from 'node:assert';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { execSync } from 'child_process';
 
 describe('repo-config.js', () => {
   let tempDir;
@@ -117,6 +118,104 @@ repos:
       assert.strictEqual(frontend.prompt, 'devcontainer');
       assert.deepStrictEqual(frontend.session, { name: 'issue-{number}' });
     });
+  });
+
+  describe('repos_dir auto-discovery', () => {
+    let reposDir;
+
+    beforeEach(() => {
+      reposDir = join(tempDir, 'code');
+      mkdirSync(reposDir);
+    });
+
+    function createGitRepo(name, remoteUrl) {
+      const repoPath = join(reposDir, name);
+      mkdirSync(repoPath);
+      execSync('git init', { cwd: repoPath, stdio: 'ignore' });
+      execSync(`git remote add origin ${remoteUrl}`, { cwd: repoPath, stdio: 'ignore' });
+      return repoPath;
+    }
+
+    test('discovers repos from git remote origin', async () => {
+      const repoPath = createGitRepo('my-project', 'https://github.com/myorg/my-project.git');
+
+      writeFileSync(configPath, `
+repos_dir: ${reposDir}
+`);
+
+      const { loadRepoConfig, getRepoConfig } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      
+      const config = getRepoConfig('myorg/my-project');
+      assert.strictEqual(config.path, repoPath);
+      assert.strictEqual(config.repo_path, repoPath);
+    });
+
+    test('handles SSH git URLs', async () => {
+      const repoPath = createGitRepo('backend', 'git@github.com:myorg/backend.git');
+
+      writeFileSync(configPath, `
+repos_dir: ${reposDir}
+`);
+
+      const { loadRepoConfig, getRepoConfig } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      
+      const config = getRepoConfig('myorg/backend');
+      assert.strictEqual(config.path, repoPath);
+    });
+
+    test('explicit repos override auto-discovered', async () => {
+      createGitRepo('my-project', 'https://github.com/myorg/my-project.git');
+
+      writeFileSync(configPath, `
+repos_dir: ${reposDir}
+repos:
+  myorg/my-project:
+    path: /custom/path
+    prompt: custom
+`);
+
+      const { loadRepoConfig, getRepoConfig } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      
+      const config = getRepoConfig('myorg/my-project');
+      // Explicit config should win
+      assert.strictEqual(config.path, '/custom/path');
+      assert.strictEqual(config.prompt, 'custom');
+    });
+
+    test('skips directories without .git', async () => {
+      const notARepo = join(reposDir, 'not-a-repo');
+      mkdirSync(notARepo);
+      writeFileSync(join(notARepo, 'file.txt'), 'hello');
+
+      writeFileSync(configPath, `
+repos_dir: ${reposDir}
+`);
+
+      const { loadRepoConfig, getRepoConfig } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      
+      // Should not find this as a repo
+      const config = getRepoConfig('not-a-repo');
+      assert.deepStrictEqual(config, {});
+    });
+
+    test('returns empty for unknown repo even with repos_dir', async () => {
+      createGitRepo('my-project', 'https://github.com/myorg/my-project.git');
+
+      writeFileSync(configPath, `
+repos_dir: ${reposDir}
+`);
+
+      const { loadRepoConfig, getRepoConfig } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      
+      const config = getRepoConfig('unknown/repo');
+      assert.deepStrictEqual(config, {});
+    });
+
   });
 
   describe('sources', () => {

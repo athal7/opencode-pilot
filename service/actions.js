@@ -10,7 +10,7 @@ import { readFileSync, existsSync } from "fs";
 import { debug } from "./logger.js";
 import { getNestedValue } from "./utils.js";
 import { getServerPort } from "./repo-config.js";
-import { resolveWorktreeDirectory } from "./worktree.js";
+import { resolveWorktreeDirectory, getProjectInfo } from "./worktree.js";
 import path from "path";
 import os from "os";
 
@@ -573,8 +573,20 @@ export async function executeAction(item, config, options = {}) {
   
   // Resolve worktree directory if configured
   // This allows creating sessions in isolated worktrees instead of the main project
+  let worktreeMode = config.worktree;
+  
+  // Auto-detect worktree support: if not explicitly configured and server is running,
+  // check if the project has sandboxes (indicating worktree workflow is set up)
+  if (!worktreeMode && serverUrl) {
+    const projectInfo = await getProjectInfo(serverUrl, { fetch: options.fetch });
+    if (projectInfo?.sandboxes?.length > 0) {
+      debug(`executeAction: auto-detected worktree support (${projectInfo.sandboxes.length} sandboxes)`);
+      worktreeMode = 'new';
+    }
+  }
+  
   const worktreeConfig = {
-    worktree: config.worktree,
+    worktree: worktreeMode,
     // Expand worktree_name template with item fields (e.g., "issue-{number}")
     worktreeName: config.worktree_name ? expandTemplate(config.worktree_name, item) : undefined,
   };

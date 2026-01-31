@@ -14,6 +14,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import YAML from "yaml";
+import { execSync } from "child_process";
 import { getNestedValue } from "./utils.js";
 import { expandPreset, expandGitHubShorthand, getProviderConfig } from "./presets/index.js";
 
@@ -31,6 +32,82 @@ const DEFAULT_TEMPLATES_DIR = path.join(
 
 // In-memory config cache (for testing and runtime)
 let configCache = null;
+
+// Cache for discovered repos from repos_dir
+let discoveredReposCache = null;
+
+/**
+ * Parse GitHub owner/repo from a git remote URL
+ * Supports HTTPS and SSH formats
+ * @param {string} url - Git remote URL
+ * @returns {string|null} "owner/repo" or null if not a GitHub URL
+ */
+function parseGitHubRepo(url) {
+  if (!url) return null;
+  
+  // HTTPS: https://github.com/owner/repo.git
+  const httpsMatch = url.match(/github\.com\/([^/]+)\/([^/.]+)/);
+  if (httpsMatch) {
+    return `${httpsMatch[1]}/${httpsMatch[2]}`;
+  }
+  
+  // SSH: git@github.com:owner/repo.git
+  const sshMatch = url.match(/github\.com:([^/]+)\/([^/.]+)/);
+  if (sshMatch) {
+    return `${sshMatch[1]}/${sshMatch[2]}`;
+  }
+  
+  return null;
+}
+
+/**
+ * Discover repos from a repos_dir by scanning git remotes
+ * @param {string} reposDir - Directory containing git repositories
+ * @returns {Map<string, object>} Map of "owner/repo" -> { path }
+ */
+function discoverRepos(reposDir) {
+  const discovered = new Map();
+  
+  if (!reposDir || !fs.existsSync(reposDir)) {
+    return discovered;
+  }
+  
+  const normalizedDir = reposDir.replace(/^~/, os.homedir());
+  
+  try {
+    const entries = fs.readdirSync(normalizedDir, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      
+      const repoPath = path.join(normalizedDir, entry.name);
+      const gitDir = path.join(repoPath, '.git');
+      
+      // Skip if not a git repo
+      if (!fs.existsSync(gitDir)) continue;
+      
+      // Get remote origin URL via git API
+      try {
+        const remoteUrl = execSync('git remote get-url origin', {
+          cwd: repoPath,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe']
+        }).trim();
+        
+        const repoKey = parseGitHubRepo(remoteUrl);
+        if (repoKey) {
+          discovered.set(repoKey, { path: repoPath });
+        }
+      } catch {
+        // Skip repos without origin or git errors
+      }
+    }
+  } catch {
+    // Directory read error
+  }
+  
+  return discovered;
+}
 
 /**
  * Expand template string with item fields
@@ -53,6 +130,10 @@ export function loadRepoConfig(configOrPath) {
   if (typeof configOrPath === "object") {
     // Direct config object (for testing)
     configCache = configOrPath;
+    // Discover repos if repos_dir is set
+    discoveredReposCache = configCache.repos_dir 
+      ? discoverRepos(configCache.repos_dir) 
+      : null;
     return configCache;
   }
 
@@ -60,16 +141,22 @@ export function loadRepoConfig(configOrPath) {
 
   if (!fs.existsSync(configPath)) {
     configCache = emptyConfig;
+    discoveredReposCache = null;
     return configCache;
   }
 
   try {
     const content = fs.readFileSync(configPath, "utf-8");
     configCache = YAML.parse(content, { merge: true }) || emptyConfig;
+    // Discover repos if repos_dir is set
+    discoveredReposCache = configCache.repos_dir 
+      ? discoverRepos(configCache.repos_dir) 
+      : null;
   } catch (err) {
     // Log error but continue with empty config to allow graceful degradation
     console.error(`Warning: Failed to parse config at ${configPath}: ${err.message}`);
     configCache = emptyConfig;
+    discoveredReposCache = null;
   }
   return configCache;
 }
@@ -86,20 +173,31 @@ function getRawConfig() {
 
 /**
  * Get configuration for a specific repo
+ * Checks explicit repos config first, then falls back to auto-discovered repos
  * @param {string} repoKey - Repository identifier (e.g., "myorg/backend")
  * @returns {object} Repository configuration or empty object
  */
 export function getRepoConfig(repoKey) {
   const config = getRawConfig();
   const repos = config.repos || {};
-  const repoConfig = repos[repoKey] || {};
-
-  // Normalize: support both 'path' and 'repo_path' keys
-  if (repoConfig.path && !repoConfig.repo_path) {
-    return { ...repoConfig, repo_path: repoConfig.path };
+  
+  // Check explicit repos config first
+  if (repos[repoKey]) {
+    const repoConfig = repos[repoKey];
+    // Normalize: support both 'path' and 'repo_path' keys
+    if (repoConfig.path && !repoConfig.repo_path) {
+      return { ...repoConfig, repo_path: repoConfig.path };
+    }
+    return repoConfig;
+  }
+  
+  // Fall back to auto-discovered repos from repos_dir
+  if (discoveredReposCache && discoveredReposCache.has(repoKey)) {
+    const discovered = discoveredReposCache.get(repoKey);
+    return { ...discovered, repo_path: discovered.path };
   }
 
-  return repoConfig;
+  return {};
 }
 
 /**
@@ -324,4 +422,5 @@ export function getServerPort() {
  */
 export function clearConfigCache() {
   configCache = null;
+  discoveredReposCache = null;
 }

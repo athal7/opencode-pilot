@@ -693,6 +693,114 @@ describe('actions.js', () => {
       assert.ok(result.command.includes(tempDir), 
         'Should fall back to base directory when worktree creation fails');
     });
+
+    test('auto-detects worktree support when project has sandboxes (dry run)', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      
+      const item = { number: 456, title: 'New feature' };
+      const config = {
+        path: tempDir,
+        prompt: 'default'
+        // Note: no worktree config - should be auto-detected
+      };
+      
+      // Mock server discovery
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      
+      // Track API calls
+      let projectInfoCalled = false;
+      let worktreeCreateCalled = false;
+      
+      const mockFetch = async (url, opts) => {
+        // Project info endpoint - returns sandboxes indicating worktree workflow
+        if (url === 'http://localhost:4096/project/current') {
+          projectInfoCalled = true;
+          return {
+            ok: true,
+            json: async () => ({
+              id: 'proj-123',
+              worktree: tempDir,
+              sandboxes: ['/data/worktree/proj-123/sandbox-1'],
+              time: { created: 1 }
+            })
+          };
+        }
+        // Worktree creation endpoint
+        if (url === 'http://localhost:4096/experimental/worktree' && opts?.method === 'POST') {
+          worktreeCreateCalled = true;
+          return {
+            ok: true,
+            json: async () => ({
+              name: 'new-sandbox',
+              branch: 'opencode/new-sandbox',
+              directory: '/data/worktree/proj-123/new-sandbox'
+            })
+          };
+        }
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await executeAction(item, config, { 
+        dryRun: true,
+        discoverServer: mockDiscoverServer,
+        fetch: mockFetch
+      });
+      
+      assert.ok(result.dryRun);
+      assert.ok(projectInfoCalled, 'Should call project/current to check for sandboxes');
+      assert.ok(worktreeCreateCalled, 'Should auto-create worktree when sandboxes detected');
+      assert.ok(result.command.includes('/data/worktree/proj-123/new-sandbox'), 
+        'Should use newly created worktree directory');
+    });
+
+    test('does not auto-create worktree when project has no sandboxes (dry run)', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      
+      const item = { number: 789, title: 'Simple fix' };
+      const config = {
+        path: tempDir,
+        prompt: 'default'
+        // Note: no worktree config
+      };
+      
+      // Mock server discovery
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      
+      let projectInfoCalled = false;
+      let worktreeCreateCalled = false;
+      
+      const mockFetch = async (url, opts) => {
+        // Project info endpoint - returns empty sandboxes (no worktree workflow)
+        if (url === 'http://localhost:4096/project/current') {
+          projectInfoCalled = true;
+          return {
+            ok: true,
+            json: async () => ({
+              id: 'proj-456',
+              worktree: tempDir,
+              sandboxes: [],
+              time: { created: 1 }
+            })
+          };
+        }
+        if (url === 'http://localhost:4096/experimental/worktree' && opts?.method === 'POST') {
+          worktreeCreateCalled = true;
+        }
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await executeAction(item, config, { 
+        dryRun: true,
+        discoverServer: mockDiscoverServer,
+        fetch: mockFetch
+      });
+      
+      assert.ok(result.dryRun);
+      assert.ok(projectInfoCalled, 'Should call project/current to check for sandboxes');
+      assert.ok(!worktreeCreateCalled, 'Should NOT create worktree when no sandboxes');
+      assert.ok(result.command.includes(tempDir), 
+        'Should use base directory when no worktree workflow detected');
+    });
   });
 
   describe('createSessionViaApi', () => {
