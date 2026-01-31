@@ -92,12 +92,6 @@ opencode-pilot test-mapping MCP   # Test field mappings
 3. **Spawn sessions** - Start `opencode run` with the appropriate prompt template
 4. **Track state** - Remember which items have been processed
 
-## Known Issues
-
-None currently! Previous issues have been resolved:
-
-- ~~Sessions attached to global server run in wrong directory~~ - Fixed by using the HTTP API with `?directory=` parameter instead of `opencode run --attach`
-
 ## Related
 
 - [opencode-devcontainers](https://github.com/athal7/opencode-devcontainers) - Run multiple devcontainer instances for OpenCode
