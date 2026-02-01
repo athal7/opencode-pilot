@@ -708,21 +708,23 @@ describe('actions.js', () => {
       const mockDiscoverServer = async () => 'http://localhost:4096';
       
       // Track API calls
-      let projectInfoCalled = false;
+      let projectListCalled = false;
       let worktreeCreateCalled = false;
       
       const mockFetch = async (url, opts) => {
-        // Project info endpoint - returns sandboxes indicating worktree workflow
-        if (url === 'http://localhost:4096/project/current') {
-          projectInfoCalled = true;
+        // Project list endpoint - returns projects including one with sandboxes
+        if (url === 'http://localhost:4096/project') {
+          projectListCalled = true;
           return {
             ok: true,
-            json: async () => ({
-              id: 'proj-123',
-              worktree: tempDir,
-              sandboxes: ['/data/worktree/proj-123/sandbox-1'],
-              time: { created: 1 }
-            })
+            json: async () => ([
+              {
+                id: 'proj-123',
+                worktree: tempDir,
+                sandboxes: ['/data/worktree/proj-123/sandbox-1'],
+                time: { created: 1 }
+              }
+            ])
           };
         }
         // Worktree creation endpoint
@@ -747,7 +749,7 @@ describe('actions.js', () => {
       });
       
       assert.ok(result.dryRun);
-      assert.ok(projectInfoCalled, 'Should call project/current to check for sandboxes');
+      assert.ok(projectListCalled, 'Should call /project to find project by directory');
       assert.ok(worktreeCreateCalled, 'Should auto-create worktree when sandboxes detected');
       assert.ok(result.command.includes('/data/worktree/proj-123/new-sandbox'), 
         'Should use newly created worktree directory');
@@ -766,21 +768,23 @@ describe('actions.js', () => {
       // Mock server discovery
       const mockDiscoverServer = async () => 'http://localhost:4096';
       
-      let projectInfoCalled = false;
+      let projectListCalled = false;
       let worktreeCreateCalled = false;
       
       const mockFetch = async (url, opts) => {
-        // Project info endpoint - returns empty sandboxes (no worktree workflow)
-        if (url === 'http://localhost:4096/project/current') {
-          projectInfoCalled = true;
+        // Project list endpoint - returns project with empty sandboxes
+        if (url === 'http://localhost:4096/project') {
+          projectListCalled = true;
           return {
             ok: true,
-            json: async () => ({
-              id: 'proj-456',
-              worktree: tempDir,
-              sandboxes: [],
-              time: { created: 1 }
-            })
+            json: async () => ([
+              {
+                id: 'proj-456',
+                worktree: tempDir,
+                sandboxes: [],
+                time: { created: 1 }
+              }
+            ])
           };
         }
         if (url === 'http://localhost:4096/experimental/worktree' && opts?.method === 'POST') {
@@ -796,7 +800,7 @@ describe('actions.js', () => {
       });
       
       assert.ok(result.dryRun);
-      assert.ok(projectInfoCalled, 'Should call project/current to check for sandboxes');
+      assert.ok(projectListCalled, 'Should call /project to find project by directory');
       assert.ok(!worktreeCreateCalled, 'Should NOT create worktree when no sandboxes');
       assert.ok(result.command.includes(tempDir), 
         'Should use base directory when no worktree workflow detected');

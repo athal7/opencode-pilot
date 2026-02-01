@@ -113,6 +113,48 @@ export async function getProjectInfo(serverUrl, options = {}) {
 }
 
 /**
+ * Get project info for a specific directory by querying all projects
+ * 
+ * @param {string} serverUrl - OpenCode server URL
+ * @param {string} directory - Directory path to find project for
+ * @param {object} [options] - Options
+ * @param {function} [options.fetch] - Custom fetch function (for testing)
+ * @returns {Promise<object|null>} Project info or null if not found
+ */
+export async function getProjectInfoForDirectory(serverUrl, directory, options = {}) {
+  const fetchFn = options.fetch || fetch;
+  
+  try {
+    const response = await fetchFn(`${serverUrl}/project`);
+    
+    if (!response.ok) {
+      debug(`getProjectInfoForDirectory: ${serverUrl} returned ${response.status}`);
+      return null;
+    }
+    
+    const projects = await response.json();
+    
+    // Find project matching this directory, preferring ones with sandboxes
+    const matches = projects.filter(p => p.worktree === directory);
+    
+    if (matches.length === 0) {
+      debug(`getProjectInfoForDirectory: no project found for ${directory}`);
+      return null;
+    }
+    
+    // Prefer the project with sandboxes (if multiple exist for same worktree)
+    const withSandboxes = matches.find(p => p.sandboxes?.length > 0);
+    const project = withSandboxes || matches[0];
+    
+    debug(`getProjectInfoForDirectory: found project ${project.id} for ${directory} with ${project.sandboxes?.length || 0} sandboxes`);
+    return project;
+  } catch (err) {
+    debug(`getProjectInfoForDirectory: error - ${err.message}`);
+    return null;
+  }
+}
+
+/**
  * Resolve the working directory based on worktree configuration
  * 
  * Uses OpenCode's experimental worktree API:

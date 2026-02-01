@@ -10,7 +10,7 @@ import { readFileSync, existsSync } from "fs";
 import { debug } from "./logger.js";
 import { getNestedValue } from "./utils.js";
 import { getServerPort } from "./repo-config.js";
-import { resolveWorktreeDirectory, getProjectInfo } from "./worktree.js";
+import { resolveWorktreeDirectory, getProjectInfo, getProjectInfoForDirectory } from "./worktree.js";
 import path from "path";
 import os from "os";
 
@@ -578,7 +578,8 @@ export async function executeAction(item, config, options = {}) {
   // Auto-detect worktree support: if not explicitly configured and server is running,
   // check if the project has sandboxes (indicating worktree workflow is set up)
   if (!worktreeMode && serverUrl) {
-    const projectInfo = await getProjectInfo(serverUrl, { fetch: options.fetch });
+    // Look up project info for this specific directory (not just /project/current)
+    const projectInfo = await getProjectInfoForDirectory(serverUrl, baseCwd, { fetch: options.fetch });
     if (projectInfo?.sandboxes?.length > 0) {
       debug(`executeAction: auto-detected worktree support (${projectInfo.sandboxes.length} sandboxes)`);
       worktreeMode = 'new';
