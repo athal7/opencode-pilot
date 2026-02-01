@@ -227,9 +227,13 @@ export async function pollOnce(options = {}) {
                 itemUpdatedAt: item.updated_at || null,
               });
             }
-            console.log(`[poll] Started session for ${item.id}`);
+            if (result.warning) {
+              console.log(`[poll] Started session for ${item.id} (warning: ${result.warning})`);
+            } else {
+              console.log(`[poll] Started session for ${item.id}`);
+            }
           } else {
-            console.error(`[poll] Failed to start session: ${result.stderr}`);
+            console.error(`[poll] Failed to start session: ${result.error || result.stderr || 'unknown error'}`);
           }
         } catch (err) {
           console.error(`[poll] Error executing action: ${err.message}`);

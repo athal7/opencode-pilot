@@ -930,5 +930,47 @@ describe('actions.js', () => {
       assert.strictEqual(messageBody.providerID, 'anthropic', 'Should parse provider from model');
       assert.strictEqual(messageBody.modelID, 'claude-sonnet-4-20250514', 'Should parse model ID');
     });
+
+    test('returns success with warning when session created but message fails', async () => {
+      const { createSessionViaApi } = await import('../../service/actions.js');
+      
+      const mockSessionId = 'ses_partial123';
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        // Session creation succeeds
+        if (urlObj.pathname === '/session' && opts?.method === 'POST') {
+          return {
+            ok: true,
+            json: async () => ({ id: mockSessionId }),
+          };
+        }
+        
+        // Message send fails
+        if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
+          return {
+            ok: false,
+            status: 500,
+            text: async () => 'Message send failed',
+          };
+        }
+        
+        return { ok: true, json: async () => ({}) };
+      };
+      
+      const result = await createSessionViaApi(
+        'http://localhost:4096',
+        '/path/to/project',
+        'Fix the bug',
+        { fetch: mockFetch }
+      );
+      
+      // Should return success because session was created
+      assert.ok(result.success, 'Should return success when session was created');
+      assert.strictEqual(result.sessionId, mockSessionId, 'Should return session ID');
+      assert.ok(result.warning, 'Should include warning about message failure');
+      assert.ok(result.warning.includes('Failed to send message'), 'Warning should mention message failure');
+    });
   });
 });

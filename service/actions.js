@@ -470,6 +470,8 @@ function runSpawn(args, options = {}) {
 export async function createSessionViaApi(serverUrl, directory, prompt, options = {}) {
   const fetchFn = options.fetch || fetch;
   
+  let session = null;
+  
   try {
     // Step 1: Create a new session with the directory parameter
     const sessionUrl = new URL('/session', serverUrl);
@@ -486,7 +488,7 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
       throw new Error(`Failed to create session: ${createResponse.status} ${errorText}`);
     }
     
-    const session = await createResponse.json();
+    session = await createResponse.json();
     debug(`createSessionViaApi: created session ${session.id} in ${directory}`);
     
     // Step 2: Update session title if provided
@@ -543,6 +545,17 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
     };
   } catch (err) {
     debug(`createSessionViaApi: error - ${err.message}`);
+    // If session was created but message failed, still return success
+    // to prevent re-processing (the session exists, user can send message manually)
+    if (session) {
+      debug(`createSessionViaApi: session ${session.id} was created, marking as success despite message error`);
+      return {
+        success: true,
+        sessionId: session.id,
+        directory,
+        warning: err.message,
+      };
+    }
     return {
       success: false,
       error: err.message,
