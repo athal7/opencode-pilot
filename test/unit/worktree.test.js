@@ -82,6 +82,26 @@ describe("worktree", () => {
       assert.strictEqual(body.name, "my-feature");
     });
 
+    it("passes directory as query parameter", async () => {
+      const mockFetch = mock.fn(async (url, options) => ({
+        ok: true,
+        json: async () => ({
+          name: "test-worktree",
+          branch: "opencode/test-worktree",
+          directory: "/data/worktree/abc123/test-worktree",
+        }),
+      }));
+
+      await createWorktree("http://localhost:4096", {
+        directory: "/Users/test/code/my-project",
+        fetch: mockFetch,
+      });
+
+      const calledUrl = mockFetch.mock.calls[0].arguments[0];
+      assert.ok(calledUrl.includes("directory="), "URL should include directory parameter");
+      assert.ok(calledUrl.includes(encodeURIComponent("/Users/test/code/my-project")), "URL should include encoded directory path");
+    });
+
     it("returns error on failure", async () => {
       const mockFetch = mock.fn(async () => ({
         ok: false,

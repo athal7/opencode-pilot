@@ -588,8 +588,12 @@ describe('actions.js', () => {
       
       // Mock worktree creation via fetch
       const mockFetch = async (url, opts) => {
-        // Worktree creation endpoint
-        if (url === 'http://localhost:4096/experimental/worktree' && opts?.method === 'POST') {
+        // Worktree creation endpoint - now includes directory query param
+        if (url.startsWith('http://localhost:4096/experimental/worktree') && opts?.method === 'POST') {
+          // Verify directory parameter is passed
+          const urlObj = new URL(url);
+          assert.strictEqual(urlObj.searchParams.get('directory'), tempDir, 
+            'Should pass directory as query param');
           const body = JSON.parse(opts.body);
           assert.strictEqual(body.name, 'feature-branch', 'Should pass worktree name');
           return {
@@ -727,8 +731,8 @@ describe('actions.js', () => {
             ])
           };
         }
-        // Worktree creation endpoint
-        if (url === 'http://localhost:4096/experimental/worktree' && opts?.method === 'POST') {
+        // Worktree creation endpoint - now includes directory query param
+        if (url.startsWith('http://localhost:4096/experimental/worktree') && opts?.method === 'POST') {
           worktreeCreateCalled = true;
           return {
             ok: true,

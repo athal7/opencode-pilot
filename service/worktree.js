@@ -40,6 +40,7 @@ export async function listWorktrees(serverUrl, options = {}) {
  * 
  * @param {string} serverUrl - OpenCode server URL (e.g., "http://localhost:4096")
  * @param {object} [options] - Options
+ * @param {string} [options.directory] - Project directory (required for global server)
  * @param {string} [options.name] - Optional name for the worktree
  * @param {string} [options.startCommand] - Optional startup script to run after creation
  * @param {function} [options.fetch] - Custom fetch function (for testing)
@@ -53,7 +54,14 @@ export async function createWorktree(serverUrl, options = {}) {
     if (options.name) body.name = options.name;
     if (options.startCommand) body.startCommand = options.startCommand;
     
-    const response = await fetchFn(`${serverUrl}/experimental/worktree`, {
+    // Build URL with directory parameter if provided
+    // This tells the global server which project to create the worktree for
+    let url = `${serverUrl}/experimental/worktree`;
+    if (options.directory) {
+      url += `?directory=${encodeURIComponent(options.directory)}`;
+    }
+    
+    const response = await fetchFn(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -189,6 +197,7 @@ export async function resolveWorktreeDirectory(serverUrl, baseDir, worktreeConfi
   // "new" - create a fresh worktree via OpenCode API
   if (worktreeValue === "new") {
     const result = await createWorktree(serverUrl, {
+      directory: baseDir,
       name: worktreeConfig.worktreeName,
       fetch: options.fetch,
     });
