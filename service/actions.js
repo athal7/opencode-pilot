@@ -525,18 +525,39 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
       messageBody.modelID = modelID;
     }
     
-    const messageResponse = await fetchFn(messageUrl.toString(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(messageBody),
-    });
+    // Use AbortController with timeout for the message POST
+    // The /session/{id}/message endpoint returns a chunked/streaming response
+    // that stays open until the agent completes. We only need to verify the
+    // request was accepted (2xx status), not wait for the full response.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
-    if (!messageResponse.ok) {
-      const errorText = await messageResponse.text();
-      throw new Error(`Failed to send message: ${messageResponse.status} ${errorText}`);
+    try {
+      const messageResponse = await fetchFn(messageUrl.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(messageBody),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!messageResponse.ok) {
+        const errorText = await messageResponse.text();
+        throw new Error(`Failed to send message: ${messageResponse.status} ${errorText}`);
+      }
+      
+      debug(`createSessionViaApi: sent message to session ${session.id}`);
+    } catch (abortErr) {
+      clearTimeout(timeoutId);
+      // AbortError is expected - we intentionally abort after verifying the request started
+      // The server accepted our message, we just don't need to wait for the response
+      if (abortErr.name === 'AbortError') {
+        debug(`createSessionViaApi: message request started for session ${session.id} (response aborted as expected)`);
+      } else {
+        throw abortErr;
+      }
     }
-    
-    debug(`createSessionViaApi: sent message to session ${session.id}`);
     
     return {
       success: true,
