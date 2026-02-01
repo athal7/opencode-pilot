@@ -352,7 +352,12 @@ export function resolveRepoForItem(source, item) {
     if (resolvedRepo) {
       return source.repos.includes(resolvedRepo) ? [resolvedRepo] : [];
     }
-    // No repo template - return empty (can't match without item context)
+    // No repo template - if exactly one repo, use it as default
+    // (e.g., Linear issues don't have repo context, user explicitly configures one repo)
+    if (source.repos.length === 1) {
+      return source.repos;
+    }
+    // Multiple repos but can't match without item context
     return [];
   }
 

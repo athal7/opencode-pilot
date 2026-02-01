@@ -769,6 +769,46 @@ sources:
       assert.deepStrictEqual(resolveRepoForItem(source, filteredItem), []);
     });
 
+    test('single-repo allowlist uses repo as default when no template', async () => {
+      // Linear issues don't have repository context - when exactly one repo is configured,
+      // use it as the default for all items from that source
+      writeFileSync(configPath, `
+sources:
+  - preset: linear/my-issues
+    repos:
+      - 0din-ai/odin
+`);
+
+      const { loadRepoConfig, getSources, resolveRepoForItem } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      const source = getSources()[0];
+
+      // Linear items don't have repository field
+      const linearItem = { id: 'linear:abc123', title: 'Fix bug', state: { name: 'In Progress' } };
+      assert.deepStrictEqual(resolveRepoForItem(source, linearItem), ['0din-ai/odin'],
+        'single-repo allowlist should use repo as default');
+    });
+
+    test('multi-repo allowlist returns empty when no template match', async () => {
+      // With multiple repos and no way to determine which one, return empty
+      writeFileSync(configPath, `
+sources:
+  - preset: linear/my-issues
+    repos:
+      - org/repo-a
+      - org/repo-b
+`);
+
+      const { loadRepoConfig, getSources, resolveRepoForItem } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      const source = getSources()[0];
+
+      // Can't determine which of the 2 repos to use
+      const linearItem = { id: 'linear:abc123', title: 'Fix bug' };
+      assert.deepStrictEqual(resolveRepoForItem(source, linearItem), [],
+        'multi-repo allowlist should return empty when no template');
+    });
+
     test('github presets include semantic session names', async () => {
       writeFileSync(configPath, `
 sources:
