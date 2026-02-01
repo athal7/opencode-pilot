@@ -5,7 +5,7 @@
  * Supports prompt_template for custom prompts (e.g., to invoke /devcontainer).
  */
 
-import { spawn, execSync } from "child_process";
+import { execSync } from "child_process";
 import { readFileSync, existsSync } from "fs";
 import { debug } from "./logger.js";
 import { getNestedValue } from "./utils.js";
@@ -418,39 +418,6 @@ export function buildCommand(item, config) {
 }
 
 /**
- * Execute a spawn command and return a promise
- */
-function runSpawn(args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const [cmd, ...cmdArgs] = args;
-    const spawnOpts = {
-      stdio: ["ignore", "pipe", "pipe"],
-      ...options,
-    };
-    const child = spawn(cmd, cmdArgs, spawnOpts);
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-
-    child.on("close", (code) => {
-      resolve({ stdout, stderr, exitCode: code, success: code === 0 });
-    });
-
-    child.on("error", (err) => {
-      reject(err);
-    });
-  });
-}
-
-/**
  * Create a session via the OpenCode HTTP API
  * 
  * This is a workaround for the known issue where `opencode run --attach` 
@@ -605,13 +572,20 @@ export async function executeAction(item, config, options = {}) {
   
   debug(`executeAction: discovered server=${serverUrl} for baseCwd=${baseCwd}`);
   
+  // Require OpenCode server - pilot runs as a plugin, so server should always be available
+  if (!serverUrl) {
+    return {
+      success: false,
+      error: 'No OpenCode server found. Pilot requires OpenCode to be running.',
+    };
+  }
+  
   // Resolve worktree directory if configured
   // This allows creating sessions in isolated worktrees instead of the main project
   let worktreeMode = config.worktree;
   
-  // Auto-detect worktree support: if not explicitly configured and server is running,
-  // check if the project has sandboxes (indicating worktree workflow is set up)
-  if (!worktreeMode && serverUrl) {
+  // Auto-detect worktree support: check if the project has sandboxes
+  if (!worktreeMode) {
     // Look up project info for this specific directory (not just /project/current)
     const projectInfo = await getProjectInfoForDirectory(serverUrl, baseCwd, { fetch: options.fetch });
     if (projectInfo?.sandboxes?.length > 0) {
@@ -643,117 +617,35 @@ export async function executeAction(item, config, options = {}) {
   
   debug(`executeAction: using cwd=${cwd}`);
   
-  // If a server is running, use the HTTP API to create the session
-  // This is a workaround for the known issue where --attach doesn't support --dir
-  // See: https://github.com/anomalyco/opencode/issues/7376
-  if (serverUrl) {
-    // Build prompt from template
-    const prompt = buildPromptFromTemplate(config.prompt || "default", item);
-    
-    // Build session title
-    const sessionTitle = config.session?.name
-      ? buildSessionName(config.session.name, item)
-      : (item.title || `session-${Date.now()}`);
-    
-    const apiCommand = `[API] POST ${serverUrl}/session?directory=${cwd}`;
-    debug(`executeAction: using HTTP API - ${apiCommand}`);
-    
-    if (options.dryRun) {
-      return {
-        command: apiCommand,
-        dryRun: true,
-        method: 'api',
-      };
-    }
-    
-    const result = await createSessionViaApi(serverUrl, cwd, prompt, {
-      title: sessionTitle,
-      agent: config.agent,
-      model: config.model,
-      fetch: options.fetch,
-    });
-    
-    return {
-      command: apiCommand,
-      success: result.success,
-      sessionId: result.sessionId,
-      error: result.error,
-      method: 'api',
-    };
-  }
+  // Build prompt from template
+  const prompt = buildPromptFromTemplate(config.prompt || "default", item);
   
-  // No server running - fall back to spawning opencode run
-  // This works correctly because we set cwd on the spawn
-  const cmdInfo = getCommandInfoNew(item, config, undefined, null);
+  // Build session title
+  const sessionTitle = config.session?.name
+    ? buildSessionName(config.session.name, item)
+    : (item.title || `session-${Date.now()}`);
   
-  // Build command string for display
-  const quoteArgs = (args) => args.map(a => 
-    a.includes(" ") || a.includes("\n") ? `"${a.replace(/"/g, '\\"')}"` : a
-  ).join(" ");
-  const cmdStr = quoteArgs(cmdInfo.args);
-  const command = cmdInfo.cwd ? `(cd ${cmdInfo.cwd} && ${cmdStr})` : cmdStr;
-
-  debug(`executeAction: command=${command}`);
-  debug(`executeAction: args=${JSON.stringify(cmdInfo.args)}, cwd=${cmdInfo.cwd}`);
-
+  const apiCommand = `[API] POST ${serverUrl}/session?directory=${cwd}`;
+  debug(`executeAction: using HTTP API - ${apiCommand}`);
+  
   if (options.dryRun) {
     return {
-      command,
+      command: apiCommand,
       dryRun: true,
-      method: 'spawn',
     };
   }
-
-  // Execute opencode run in background (detached)
-  // We don't wait for completion since sessions can run for a long time
-  debug(`executeAction: spawning opencode run (detached)`);
-  const [cmd, ...cmdArgs] = cmdInfo.args;
-  const child = spawn(cmd, cmdArgs, {
-    cwd: cmdInfo.cwd,
-    detached: true,
-    stdio: 'ignore',
-  });
-  child.unref();
   
-  debug(`executeAction: spawned pid=${child.pid}`);
-  return {
-    command,
-    success: true,
-    pid: child.pid,
-    method: 'spawn',
-  };
-}
-
-/**
- * Check if opencode is available
- * @returns {Promise<boolean>}
- */
-export async function checkOpencode() {
-  return new Promise((resolve) => {
-    const child = spawn("which", ["opencode"]);
-    child.on("close", (code) => {
-      resolve(code === 0);
-    });
-    child.on("error", () => {
-      resolve(false);
-    });
+  const result = await createSessionViaApi(serverUrl, cwd, prompt, {
+    title: sessionTitle,
+    agent: config.agent,
+    model: config.model,
+    fetch: options.fetch,
   });
-}
-
-/**
- * Validate that required tools are available
- * @returns {Promise<object>} { valid: boolean, missing?: string[] }
- */
-export async function validateTools() {
-  const missing = [];
-
-  const hasOpencode = await checkOpencode();
-  if (!hasOpencode) {
-    missing.push("opencode");
-  }
-
+  
   return {
-    valid: missing.length === 0,
-    missing,
+    command: apiCommand,
+    success: result.success,
+    sessionId: result.sessionId,
+    error: result.error,
   };
 }

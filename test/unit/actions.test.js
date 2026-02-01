@@ -543,13 +543,12 @@ describe('actions.js', () => {
       });
       
       assert.ok(result.dryRun);
-      assert.strictEqual(result.method, 'api', 'Should use API method when server found');
       assert.ok(result.command.includes('POST'), 'Command should show POST request');
       assert.ok(result.command.includes('http://localhost:4096'), 'Command should include server URL');
       assert.ok(result.command.includes('directory='), 'Command should include directory param');
     });
 
-    test('falls back to spawn when no server discovered (dry run)', async () => {
+    test('returns error when no server discovered', async () => {
       const { executeAction } = await import('../../service/actions.js');
       
       const item = { number: 123, title: 'Fix bug' };
@@ -566,10 +565,8 @@ describe('actions.js', () => {
         discoverServer: mockDiscoverServer
       });
       
-      assert.ok(result.dryRun);
-      assert.strictEqual(result.method, 'spawn', 'Should use spawn method when no server');
-      assert.ok(!result.command.includes('--attach'), 'Command should not include --attach flag');
-      assert.ok(result.command.includes('opencode run'), 'Command should include opencode run');
+      assert.strictEqual(result.success, false, 'Should fail when no server');
+      assert.ok(result.error.includes('No OpenCode server'), 'Should have descriptive error');
     });
 
     test('creates new worktree when worktree: "new" is configured (dry run)', async () => {
@@ -615,7 +612,6 @@ describe('actions.js', () => {
       });
       
       assert.ok(result.dryRun);
-      assert.strictEqual(result.method, 'api', 'Should use API method');
       // The directory in the command should be the worktree directory
       assert.ok(result.command.includes('/data/worktree/proj123/feature-branch'), 
         'Should use worktree directory in command');
@@ -655,7 +651,6 @@ describe('actions.js', () => {
       });
       
       assert.ok(result.dryRun);
-      assert.strictEqual(result.method, 'api', 'Should use API method');
       assert.ok(result.command.includes('/data/worktree/proj123/my-feature'), 
         'Should use looked up worktree path in command');
     });
@@ -692,7 +687,6 @@ describe('actions.js', () => {
       });
       
       assert.ok(result.dryRun);
-      assert.strictEqual(result.method, 'api', 'Should still use API method');
       // Should fall back to base directory
       assert.ok(result.command.includes(tempDir), 
         'Should fall back to base directory when worktree creation fails');
