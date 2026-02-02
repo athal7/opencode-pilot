@@ -166,6 +166,20 @@ if (isMainModule()) {
   
   console.log('[opencode-pilot] Starting service...')
   
+  // Handle uncaught exceptions - log and exit to prevent silent crashes
+  process.on('uncaughtException', (err) => {
+    console.error('[opencode-pilot] Uncaught exception:', err.message)
+    console.error(err.stack)
+    process.exit(1)
+  })
+  
+  // Handle unhandled promise rejections - log and exit to prevent silent crashes
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('[opencode-pilot] Unhandled rejection at:', promise)
+    console.error('[opencode-pilot] Reason:', reason)
+    process.exit(1)
+  })
+  
   startService(config).then((service) => {
     // Handle graceful shutdown
     process.on('SIGTERM', async () => {
