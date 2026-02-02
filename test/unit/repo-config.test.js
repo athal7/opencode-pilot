@@ -679,24 +679,6 @@ sources:
       assert.ok(sources[0].tool.command.includes('--review-requested=@me'), 'command should include review-requested filter');
     });
 
-    test('expands github/my-prs-feedback preset', async () => {
-      writeFileSync(configPath, `
-sources:
-  - preset: github/my-prs-feedback
-`);
-
-      const { loadRepoConfig, getSources } = await import('../../service/repo-config.js');
-      loadRepoConfig(configPath);
-      const sources = getSources();
-
-      assert.strictEqual(sources[0].name, 'my-prs-feedback');
-      // GitHub presets now use gh CLI instead of MCP
-      assert.ok(sources[0].tool.command.includes('--author=@me'), 'command should include author filter');
-      assert.ok(sources[0].tool.command.includes('comments:>0'), 'command should filter for PRs with comments');
-      // This preset includes updatedAt in reprocess_on to catch new commits
-      assert.deepStrictEqual(sources[0].reprocess_on, ['state', 'updatedAt']);
-    });
-
     test('expands github/my-prs-attention preset', async () => {
       writeFileSync(configPath, `
 sources:
@@ -774,7 +756,6 @@ sources:
 sources:
   - preset: github/my-issues
   - preset: github/review-requests
-  - preset: github/my-prs-feedback
   - preset: github/my-prs-attention
 `);
 
@@ -860,7 +841,6 @@ sources:
 sources:
   - preset: github/my-issues
   - preset: github/review-requests
-  - preset: github/my-prs-feedback
   - preset: github/my-prs-attention
 `);
 
@@ -874,11 +854,8 @@ sources:
       // review-requests: "Review: {title}"
       assert.strictEqual(sources[1].session.name, 'Review: {title}', 'review-requests should prefix with Review:');
       
-      // my-prs-feedback: "Feedback: {title}"
-      assert.strictEqual(sources[2].session.name, 'Feedback: {title}', 'my-prs-feedback should prefix with Feedback:');
-      
       // my-prs-attention: "{_attention_label}: {title}" (dynamic based on detected conditions)
-      assert.ok(sources[3].session.name.includes('_attention_label'), 'my-prs-attention should use dynamic label');
+      assert.ok(sources[2].session.name.includes('_attention_label'), 'my-prs-attention should use dynamic label');
     });
 
     test('linear preset includes session name', async () => {

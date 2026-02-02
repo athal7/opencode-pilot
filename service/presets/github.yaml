@@ -37,23 +37,6 @@ review-requests:
   session:
     name: "Review: {title}"
 
-my-prs-feedback:
-  name: my-prs-feedback
-  tool:
-    # comments:>0 filter ensures only PRs with feedback are returned
-    command: ["gh", "search", "prs", "--author=@me", "--state=open", "comments:>0", "--json", "number,title,url,repository,state,body,updatedAt,commentsCount"]
-  item:
-    id: "{url}"
-  repo: "{repository.nameWithOwner}"
-  prompt: review-feedback
-  session:
-    name: "Feedback: {title}"
-  # Reprocess when PR is updated (new commits pushed, new comments, etc.)
-  # This ensures we re-trigger after addressing review feedback
-  reprocess_on:
-    - state
-    - updatedAt
-
 my-prs-attention:
   name: my-prs-attention
   tool:
