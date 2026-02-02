@@ -33,6 +33,7 @@ review-requests:
   item:
     id: "{url}"
   repo: "{repository.nameWithOwner}"
+  prompt: review
   session:
     name: "Review: {title}"
 
@@ -44,6 +45,7 @@ my-prs-feedback:
   item:
     id: "{url}"
   repo: "{repository.nameWithOwner}"
+  prompt: review-feedback
   session:
     name: "Feedback: {title}"
   # Reprocess when PR is updated (new commits pushed, new comments, etc.)
