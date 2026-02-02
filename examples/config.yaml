@@ -26,10 +26,8 @@ sources:
     prompt: worktree
 
   - preset: github/review-requests
-    prompt: review
 
   - preset: github/my-prs-feedback
-    prompt: review-feedback
     repos:
       - myorg/backend
       - myorg/frontend
