@@ -62,6 +62,7 @@ function parseGitHubRepo(url) {
 
 /**
  * Discover repos from a repos_dir by scanning git remotes
+ * Checks both 'origin' and 'upstream' remotes to support fork workflows
  * @param {string} reposDir - Directory containing git repositories
  * @returns {Map<string, object>} Map of "owner/repo" -> { path }
  */
@@ -90,20 +91,24 @@ function discoverRepos(reposDir) {
       // Skip if not a git repo
       if (!fs.existsSync(gitDir)) continue;
       
-      // Get remote origin URL via git API
-      try {
-        const remoteUrl = execSync('git remote get-url origin', {
-          cwd: repoPath,
-          encoding: 'utf-8',
-          stdio: ['pipe', 'pipe', 'pipe']
-        }).trim();
-        
-        const repoKey = parseGitHubRepo(remoteUrl);
-        if (repoKey) {
-          discovered.set(repoKey, { path: repoPath });
+      // Check both origin and upstream remotes to support fork workflows
+      // e.g., origin = athal7/opencode (fork), upstream = anomalyco/opencode (original)
+      // Both should resolve to the same local path
+      for (const remote of ['origin', 'upstream']) {
+        try {
+          const remoteUrl = execSync(`git remote get-url ${remote}`, {
+            cwd: repoPath,
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe']
+          }).trim();
+          
+          const repoKey = parseGitHubRepo(remoteUrl);
+          if (repoKey) {
+            discovered.set(repoKey, { path: repoPath });
+          }
+        } catch {
+          // Skip if remote doesn't exist or git errors
         }
-      } catch {
-        // Skip repos without origin or git errors
       }
     }
   } catch {
@@ -424,6 +429,16 @@ export function getCleanupTtlDays() {
 export function getServerPort() {
   const config = getRawConfig();
   return config?.server_port ?? null;
+}
+
+/**
+ * Get startup delay from config (ms to wait before first poll)
+ * This allows OpenCode server time to fully initialize after restart
+ * @returns {number} Startup delay in ms (default: 10000 = 10 seconds)
+ */
+export function getStartupDelay() {
+  const config = getRawConfig();
+  return config?.startup_delay ?? 10000;
 }
 
 /**

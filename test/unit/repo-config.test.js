@@ -216,6 +216,29 @@ repos_dir: ${reposDir}
       assert.deepStrictEqual(config, {});
     });
 
+    test('discovers repos from upstream remote for fork workflows', async () => {
+      // Create a repo with both origin (fork) and upstream (original) remotes
+      const repoPath = join(reposDir, 'opencode');
+      mkdirSync(repoPath);
+      execSync('git init', { cwd: repoPath, stdio: 'ignore' });
+      execSync('git remote add origin https://github.com/athal7/opencode.git', { cwd: repoPath, stdio: 'ignore' });
+      execSync('git remote add upstream https://github.com/anomalyco/opencode.git', { cwd: repoPath, stdio: 'ignore' });
+
+      writeFileSync(configPath, `
+repos_dir: ${reposDir}
+`);
+
+      const { loadRepoConfig, getRepoConfig } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      
+      // Both the fork (origin) and original (upstream) should resolve to the same local path
+      const forkConfig = getRepoConfig('athal7/opencode');
+      const upstreamConfig = getRepoConfig('anomalyco/opencode');
+      
+      assert.strictEqual(forkConfig.path, repoPath, 'fork (origin) should resolve');
+      assert.strictEqual(upstreamConfig.path, repoPath, 'upstream should also resolve');
+    });
+
   });
 
   describe('sources', () => {
