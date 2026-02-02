@@ -9,7 +9,7 @@
  * 5. Track processed items to avoid duplicates
  */
 
-import { loadRepoConfig, getRepoConfig, getAllSources, getToolProviderConfig, resolveRepoForItem, getCleanupTtlDays } from "./repo-config.js";
+import { loadRepoConfig, getRepoConfig, getAllSources, getToolProviderConfig, resolveRepoForItem, getCleanupTtlDays, getStartupDelay } from "./repo-config.js";
 import { createPoller, pollGenericSource, enrichItemsWithComments } from "./poller.js";
 import { evaluateReadiness, sortByPriority } from "./readiness.js";
 import { executeAction, buildCommand } from "./actions.js";
@@ -198,6 +198,14 @@ export async function pollOnce(options = {}) {
       // Build action config from source and item (resolves repo from item fields)
       const actionConfig = buildActionConfigForItem(source, item);
 
+      // Skip items with no valid local path (prevents sessions in home directory)
+      const hasLocalPath = actionConfig.working_dir || actionConfig.path || actionConfig.repo_path;
+      if (!hasLocalPath) {
+        debug(`Skipping ${item.id} - no local path configured for repository`);
+        console.warn(`[poll] Skipping ${item.id} - no local path configured (repo not in repos_dir or explicit config)`);
+        continue;
+      }
+
       // Execute or dry-run
       if (dryRun) {
         const command = buildCommand(item, actionConfig);
@@ -232,8 +240,13 @@ export async function pollOnce(options = {}) {
             } else {
               console.log(`[poll] Started session for ${item.id}`);
             }
+          } else if (result.skipped) {
+            // Item was skipped (e.g., no local path configured) - use debug level
+            // This will retry on next poll, but doesn't spam logs
+            debug(`Skipped ${item.id}: ${result.error}`);
           } else {
-            console.error(`[poll] Failed to start session: ${result.error || result.stderr || 'unknown error'}`);
+            // Real failure - log as error
+            console.error(`[poll] Failed to start session for ${item.id}: ${result.error || result.stderr || 'unknown error'}`);
           }
         } catch (err) {
           console.error(`[poll] Error executing action: ${err.message}`);
@@ -287,12 +300,21 @@ export function startPolling(options = {}) {
     console.log(`[poll] Cleaned up ${expiredRemoved} expired state entries (older than ${ttlDays} days)`);
   }
 
-  // Run first poll immediately
-  pollOnce({ configPath }).catch((err) => {
-    console.error("[poll] Error in poll cycle:", err.message);
-  });
+  // Delay first poll to allow OpenCode server to fully initialize
+  // This prevents race conditions on startup where projects/sandboxes aren't loaded yet
+  const startupDelay = getStartupDelay();
+  if (startupDelay > 0) {
+    console.log(`[poll] Waiting ${startupDelay / 1000}s for server to initialize...`);
+  }
+  
+  // Schedule first poll after startup delay (or immediately if delay is 0)
+  setTimeout(() => {
+    pollOnce({ configPath }).catch((err) => {
+      console.error("[poll] Error in poll cycle:", err.message);
+    });
+  }, startupDelay);
 
-  // Start interval
+  // Start interval (runs after startup delay + interval for first scheduled poll)
   pollingInterval = setInterval(() => {
     pollOnce({ configPath }).catch((err) => {
       console.error("[poll] Error in poll cycle:", err.message);

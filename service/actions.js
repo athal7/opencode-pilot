@@ -290,131 +290,20 @@ export function getActionConfig(source, repoConfig, defaults) {
 }
 
 /**
- * Get command info using new config format
+ * Build a display string for dry-run logging
+ * Shows what API call would be made
  * @param {object} item - Item to create session for
- * @param {object} config - Merged action config
- * @param {string} [templatesDir] - Templates directory path (for testing)
- * @param {string} [serverUrl] - URL of running opencode server to attach to
- * @returns {object} { args: string[], cwd: string }
+ * @param {object} config - Repo config with action settings
+ * @returns {string} Display string for logging
  */
-export function getCommandInfoNew(item, config, templatesDir, serverUrl) {
-  // Determine working directory: working_dir > path > repo_path > home
-  const workingDir = config.working_dir || config.path || config.repo_path || "~";
-  const cwd = expandPath(workingDir);
-
-  // Build session name
+export function buildCommand(item, config) {
+  const workingDir = config.working_dir || config.path || config.repo_path;
+  const cwd = workingDir ? expandPath(workingDir) : '(no path)';
   const sessionName = config.session?.name
     ? buildSessionName(config.session.name, item)
     : (item.title || `session-${Date.now()}`);
-
-  // Build command args
-  const args = ["opencode", "run"];
   
-  // Add --attach if server URL is provided
-  if (serverUrl) {
-    args.push("--attach", serverUrl);
-  }
-  
-  // Add session title
-  args.push("--title", sessionName);
-  
-  // Add agent if specified
-  if (config.agent) {
-    args.push("--agent", config.agent);
-  }
-  
-  // Add model if specified
-  if (config.model) {
-    args.push("--model", config.model);
-  }
-
-  // Build prompt from template
-  const prompt = buildPromptFromTemplate(config.prompt || "default", item, templatesDir);
-  if (prompt) {
-    args.push(prompt);
-  }
-
-  return { args, cwd };
-}
-
-/**
- * Build the prompt from item and config
- * Uses prompt_template if provided, otherwise combines title and body
- * @param {object} item - Item with title, body, etc.
- * @param {object} config - Config with optional session.prompt_template
- * @returns {string} The prompt to send to opencode
- */
-function buildPrompt(item, config) {
-  // If prompt_template is provided, expand it
-  if (config.session?.prompt_template) {
-    return expandTemplate(config.session.prompt_template, item);
-  }
-  
-  // Default: combine title and body
-  const parts = [];
-  if (item.title) parts.push(item.title);
-  if (item.body) parts.push(item.body);
-  return parts.join("\n\n");
-}
-
-/**
- * Build command args for action
- * Uses "opencode run" for non-interactive execution
- * @deprecated Legacy function - not currently used. See getCommandInfoNew instead.
- * @returns {object} { args: string[], cwd: string }
- */
-function buildCommandArgs(item, config) {
-  const repoPath = expandPath(config.repo_path || ".");
-  const sessionTitle = config.session?.name_template
-    ? buildSessionName(config.session.name_template, item)
-    : (item.title || `session-${Date.now()}`);
-
-  // Build opencode run command args array (non-interactive)
-  // Note: --title sets session title (--session is for continuing existing sessions)
-  const args = ["opencode", "run"];
-
-  // Add title for the session (helps identify it later)
-  args.push("--title", sessionTitle);
-
-  // Add agent if specified
-  if (config.session?.agent) {
-    args.push("--agent", config.session.agent);
-  }
-
-  // Add prompt (must be last for "run" command)
-  const prompt = buildPrompt(item, config);
-  if (prompt) {
-    args.push(prompt);
-  }
-
-  return { args, cwd: repoPath };
-}
-
-/**
- * Get command info for an action
- * @param {object} item - Item to create session for
- * @param {object} config - Repo config with action settings
- * @returns {object} { args: string[], cwd: string }
- */
-export function getCommandInfo(item, config) {
-  return getCommandInfoNew(item, config);
-}
-
-/**
- * Build command string for display/logging
- * @param {object} item - Item to create session for
- * @param {object} config - Repo config with action settings
- * @returns {string} Command string (for display only)
- */
-export function buildCommand(item, config) {
-  const cmdInfo = getCommandInfo(item, config);
-  
-  const quoteArgs = (args) => args.map(a => 
-    a.includes(" ") || a.includes("\n") ? `"${a.replace(/"/g, '\\"')}"` : a
-  ).join(" ");
-  
-  const cmdStr = quoteArgs(cmdInfo.args);
-  return cmdInfo.cwd ? `(cd ${cmdInfo.cwd} && ${cmdStr})` : cmdStr;
+  return `[API] POST /session?directory=${cwd} (title: "${sessionName}")`;
 }
 
 /**
@@ -562,8 +451,19 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
  * @returns {Promise<object>} Result with command, stdout, stderr, exitCode
  */
 export async function executeAction(item, config, options = {}) {
-  // Get base working directory first to determine which server to attach to
-  const workingDir = config.working_dir || config.path || config.repo_path || "~";
+  // Get base working directory - require explicit config, don't default to home
+  const workingDir = config.working_dir || config.path || config.repo_path;
+  
+  // Fail-safe: require a valid local path to be configured
+  if (!workingDir) {
+    debug(`executeAction: skipping item - no local path configured`);
+    return {
+      success: false,
+      skipped: true,
+      error: 'No local path configured for this repository. Configure repos_dir or add explicit repo config.',
+    };
+  }
+  
   const baseCwd = expandPath(workingDir);
   
   // Discover running opencode server for this directory
@@ -573,10 +473,12 @@ export async function executeAction(item, config, options = {}) {
   debug(`executeAction: discovered server=${serverUrl} for baseCwd=${baseCwd}`);
   
   // Require OpenCode server - pilot runs as a plugin, so server should always be available
+  // Mark as skipped (retriable) rather than hard error - server may still be initializing
   if (!serverUrl) {
     return {
       success: false,
-      error: 'No OpenCode server found. Pilot requires OpenCode to be running.',
+      skipped: true,
+      error: 'No OpenCode server found. Will retry on next poll.',
     };
   }
   
