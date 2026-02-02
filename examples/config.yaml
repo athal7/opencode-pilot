@@ -27,10 +27,15 @@ sources:
 
   - preset: github/review-requests
 
-  - preset: github/my-prs-feedback
+  # PRs needing attention (conflicts OR feedback) - recommended over my-prs-feedback
+  # Session names dynamically indicate the condition: "Conflicts: ...", "Feedback: ...", or "Conflicts+Feedback: ..."
+  - preset: github/my-prs-attention
     repos:
       - myorg/backend
       - myorg/frontend
+
+  # Alternative: Simple feedback-only trigger (use my-prs-attention for conflicts too)
+  # - preset: github/my-prs-feedback
 
   # Linear (requires teamId and assigneeId)
   - preset: linear/my-issues
@@ -87,4 +92,4 @@ sources:
 #   ttl_days: 30
 
 # Available presets: github/my-issues, github/review-requests,
-# github/my-prs-feedback, linear/my-issues
+# github/my-prs-feedback, github/my-prs-attention, linear/my-issues

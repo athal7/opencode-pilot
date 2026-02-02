@@ -387,4 +387,293 @@ describe('readiness.js', () => {
       assert.strictEqual(result.ready, true);
     });
   });
+
+  describe('checkMergeable', () => {
+    test('returns ready when no _mergeable field (skip check)', async () => {
+      const { checkMergeable } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR'
+      };
+      const config = {};
+      
+      const result = checkMergeable(pr, config);
+      
+      assert.strictEqual(result.ready, true);
+    });
+
+    test('returns ready when PR has conflicts and require_conflicts is true', async () => {
+      const { checkMergeable } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _mergeable: 'CONFLICTING'
+      };
+      const config = {
+        readiness: {
+          require_conflicts: true
+        }
+      };
+      
+      const result = checkMergeable(pr, config);
+      
+      assert.strictEqual(result.ready, true);
+    });
+
+    test('returns not ready when PR is mergeable and require_conflicts is true', async () => {
+      const { checkMergeable } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _mergeable: 'MERGEABLE'
+      };
+      const config = {
+        readiness: {
+          require_conflicts: true
+        }
+      };
+      
+      const result = checkMergeable(pr, config);
+      
+      assert.strictEqual(result.ready, false);
+      assert.ok(result.reason.includes('MERGEABLE'));
+    });
+
+    test('returns not ready when PR status is UNKNOWN and require_conflicts is true', async () => {
+      const { checkMergeable } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _mergeable: 'UNKNOWN'
+      };
+      const config = {
+        readiness: {
+          require_conflicts: true
+        }
+      };
+      
+      const result = checkMergeable(pr, config);
+      
+      assert.strictEqual(result.ready, false);
+      assert.ok(result.reason.includes('UNKNOWN'));
+    });
+
+    test('returns ready for any mergeable status when require_conflicts is not set', async () => {
+      const { checkMergeable } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _mergeable: 'CONFLICTING'
+      };
+      const config = {};
+      
+      const result = checkMergeable(pr, config);
+      
+      assert.strictEqual(result.ready, true);
+    });
+  });
+
+  describe('evaluateReadiness with mergeable', () => {
+    test('checks mergeable when _mergeable is present with require_conflicts', async () => {
+      const { evaluateReadiness } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _mergeable: 'MERGEABLE'
+      };
+      const config = {
+        readiness: {
+          require_conflicts: true
+        }
+      };
+      
+      const result = evaluateReadiness(pr, config);
+      
+      assert.strictEqual(result.ready, false);
+      assert.ok(result.reason.includes('MERGEABLE'));
+    });
+
+    test('passes when PR has conflicts and require_conflicts is configured', async () => {
+      const { evaluateReadiness } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _mergeable: 'CONFLICTING'
+      };
+      const config = {
+        readiness: {
+          require_conflicts: true
+        }
+      };
+      
+      const result = evaluateReadiness(pr, config);
+      
+      assert.strictEqual(result.ready, true);
+    });
+  });
+
+  describe('checkAttention', () => {
+    test('returns ready when require_attention is not configured', async () => {
+      const { checkAttention } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _has_attention: false
+      };
+      const config = {};
+      
+      const result = checkAttention(pr, config);
+      
+      assert.strictEqual(result.ready, true);
+    });
+
+    test('returns ready when _has_attention is not computed', async () => {
+      const { checkAttention } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR'
+      };
+      const config = {
+        readiness: {
+          require_attention: true
+        }
+      };
+      
+      const result = checkAttention(pr, config);
+      
+      assert.strictEqual(result.ready, true);
+    });
+
+    test('returns ready when PR has attention (conflicts)', async () => {
+      const { checkAttention } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _has_attention: true,
+        _attention_label: 'Conflicts'
+      };
+      const config = {
+        readiness: {
+          require_attention: true
+        }
+      };
+      
+      const result = checkAttention(pr, config);
+      
+      assert.strictEqual(result.ready, true);
+    });
+
+    test('returns ready when PR has attention (feedback)', async () => {
+      const { checkAttention } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _has_attention: true,
+        _attention_label: 'Feedback'
+      };
+      const config = {
+        readiness: {
+          require_attention: true
+        }
+      };
+      
+      const result = checkAttention(pr, config);
+      
+      assert.strictEqual(result.ready, true);
+    });
+
+    test('returns ready when PR has both conditions', async () => {
+      const { checkAttention } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _has_attention: true,
+        _attention_label: 'Conflicts+Feedback'
+      };
+      const config = {
+        readiness: {
+          require_attention: true
+        }
+      };
+      
+      const result = checkAttention(pr, config);
+      
+      assert.strictEqual(result.ready, true);
+    });
+
+    test('returns not ready when PR has no attention conditions', async () => {
+      const { checkAttention } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _has_attention: false,
+        _attention_label: 'PR'
+      };
+      const config = {
+        readiness: {
+          require_attention: true
+        }
+      };
+      
+      const result = checkAttention(pr, config);
+      
+      assert.strictEqual(result.ready, false);
+      assert.ok(result.reason.includes('no conflicts'));
+    });
+  });
+
+  describe('evaluateReadiness with attention', () => {
+    test('checks attention when require_attention is configured', async () => {
+      const { evaluateReadiness } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _has_attention: false
+      };
+      const config = {
+        readiness: {
+          require_attention: true
+        }
+      };
+      
+      const result = evaluateReadiness(pr, config);
+      
+      assert.strictEqual(result.ready, false);
+      assert.ok(result.reason.includes('no attention needed'));
+    });
+
+    test('passes when PR has attention', async () => {
+      const { evaluateReadiness } = await import('../../service/readiness.js');
+      
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        _has_attention: true,
+        _attention_label: 'Conflicts'
+      };
+      const config = {
+        readiness: {
+          require_attention: true
+        }
+      };
+      
+      const result = evaluateReadiness(pr, config);
+      
+      assert.strictEqual(result.ready, true);
+    });
+  });
 });

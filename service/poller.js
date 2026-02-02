@@ -534,6 +534,116 @@ export async function enrichItemsWithComments(items, source, options = {}) {
 }
 
 /**
+ * Fetch mergeable status for a PR via gh CLI
+ * 
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {number} number - PR number
+ * @param {number} timeout - Timeout in ms
+ * @returns {Promise<string|null>} Mergeable status ("MERGEABLE", "CONFLICTING", "UNKNOWN") or null on error
+ */
+async function fetchMergeableStatus(owner, repo, number, timeout) {
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+  
+  try {
+    const { stdout } = await Promise.race([
+      execAsync(`gh pr view ${number} -R ${owner}/${repo} --json mergeable --jq .mergeable`),
+      createTimeout(timeout, "gh pr view"),
+    ]);
+    
+    const status = stdout.trim();
+    return status || null;
+  } catch (err) {
+    console.error(`[poller] Error fetching mergeable status for ${owner}/${repo}#${number}: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * Enrich items with mergeable status for conflict detection
+ * 
+ * For items from sources with enrich_mergeable: true, fetches mergeable status
+ * via gh CLI and attaches it as _mergeable field for readiness evaluation.
+ * 
+ * @param {Array} items - Items to enrich
+ * @param {object} source - Source configuration with optional enrich_mergeable
+ * @param {object} [options] - Options
+ * @param {number} [options.timeout] - Timeout in ms (default: 30000)
+ * @returns {Promise<Array>} Items with _mergeable field added
+ */
+export async function enrichItemsWithMergeable(items, source, options = {}) {
+  // Skip if not configured
+  if (!source.enrich_mergeable) {
+    return items;
+  }
+  
+  const timeout = options.timeout || DEFAULT_MCP_TIMEOUT;
+  
+  // Fetch mergeable status for each item
+  const enrichedItems = [];
+  for (const item of items) {
+    // Extract owner/repo from item
+    const fullName = item.repository_full_name || item.repository?.nameWithOwner;
+    if (!fullName || !item.number) {
+      enrichedItems.push(item);
+      continue;
+    }
+    
+    const [owner, repo] = fullName.split("/");
+    const mergeable = await fetchMergeableStatus(owner, repo, item.number, timeout);
+    enrichedItems.push({ ...item, _mergeable: mergeable });
+  }
+  
+  return enrichedItems;
+}
+
+/**
+ * Compute attention label from enriched item conditions
+ * 
+ * Examines _mergeable and _comments fields to determine what needs attention.
+ * Sets _attention_label (for session name) and _has_attention (for readiness).
+ * 
+ * @param {Array} items - Items enriched with _mergeable and/or _comments
+ * @param {object} source - Source configuration
+ * @returns {Array} Items with _attention_label and _has_attention added
+ */
+export function computeAttentionLabels(items, source) {
+  return items.map(item => {
+    const reasons = [];
+    
+    // Check for merge conflicts
+    if (item._mergeable === 'CONFLICTING') {
+      reasons.push('Conflicts');
+    }
+    
+    // Check for human feedback (non-bot, non-author comments)
+    if (item._comments && item._comments.length > 0) {
+      const authorUsername = item.user?.login || item.author?.login;
+      const hasHumanFeedback = item._comments.some(comment => {
+        const commenter = comment.user?.login || comment.author?.login;
+        const isBot = commenter?.includes('[bot]') || comment.user?.type === 'Bot';
+        const isAuthor = commenter === authorUsername;
+        return !isBot && !isAuthor;
+      });
+      if (hasHumanFeedback) {
+        reasons.push('Feedback');
+      }
+    }
+    
+    // Build label: "Conflicts", "Feedback", or "Conflicts+Feedback"
+    const label = reasons.length > 0 ? reasons.join('+') : 'PR';
+    
+    return {
+      ...item,
+      _attention_label: label,
+      _has_attention: reasons.length > 0,
+    };
+  });
+}
+
+/**
  * Create a poller instance with state tracking
  * 
  * @param {object} options - Poller options

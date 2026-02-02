@@ -902,4 +902,116 @@ describe('poller.js', () => {
       assert.strictEqual(transformed[0].title, 'First');
     });
   });
+
+  describe('computeAttentionLabels', () => {
+    test('labels PR with conflicts only', async () => {
+      const { computeAttentionLabels } = await import('../../service/poller.js');
+      
+      const items = [{
+        number: 123,
+        title: 'Test PR',
+        _mergeable: 'CONFLICTING',
+        _comments: []
+      }];
+      
+      const result = computeAttentionLabels(items, {});
+      
+      assert.strictEqual(result[0]._attention_label, 'Conflicts');
+      assert.strictEqual(result[0]._has_attention, true);
+    });
+
+    test('labels PR with human feedback only', async () => {
+      const { computeAttentionLabels } = await import('../../service/poller.js');
+      
+      const items = [{
+        number: 123,
+        title: 'Test PR',
+        user: { login: 'author' },
+        _mergeable: 'MERGEABLE',
+        _comments: [
+          { user: { login: 'reviewer', type: 'User' }, body: 'Please fix' }
+        ]
+      }];
+      
+      const result = computeAttentionLabels(items, {});
+      
+      assert.strictEqual(result[0]._attention_label, 'Feedback');
+      assert.strictEqual(result[0]._has_attention, true);
+    });
+
+    test('labels PR with both conflicts and feedback', async () => {
+      const { computeAttentionLabels } = await import('../../service/poller.js');
+      
+      const items = [{
+        number: 123,
+        title: 'Test PR',
+        user: { login: 'author' },
+        _mergeable: 'CONFLICTING',
+        _comments: [
+          { user: { login: 'reviewer', type: 'User' }, body: 'Please fix' }
+        ]
+      }];
+      
+      const result = computeAttentionLabels(items, {});
+      
+      assert.strictEqual(result[0]._attention_label, 'Conflicts+Feedback');
+      assert.strictEqual(result[0]._has_attention, true);
+    });
+
+    test('labels PR with no attention conditions', async () => {
+      const { computeAttentionLabels } = await import('../../service/poller.js');
+      
+      const items = [{
+        number: 123,
+        title: 'Test PR',
+        user: { login: 'author' },
+        _mergeable: 'MERGEABLE',
+        _comments: []
+      }];
+      
+      const result = computeAttentionLabels(items, {});
+      
+      assert.strictEqual(result[0]._attention_label, 'PR');
+      assert.strictEqual(result[0]._has_attention, false);
+    });
+
+    test('ignores bot comments when computing feedback', async () => {
+      const { computeAttentionLabels } = await import('../../service/poller.js');
+      
+      const items = [{
+        number: 123,
+        title: 'Test PR',
+        user: { login: 'author' },
+        _mergeable: 'MERGEABLE',
+        _comments: [
+          { user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'CI passed' },
+          { user: { login: 'codecov[bot]', type: 'Bot' }, body: 'Coverage report' }
+        ]
+      }];
+      
+      const result = computeAttentionLabels(items, {});
+      
+      assert.strictEqual(result[0]._attention_label, 'PR');
+      assert.strictEqual(result[0]._has_attention, false);
+    });
+
+    test('ignores author comments when computing feedback', async () => {
+      const { computeAttentionLabels } = await import('../../service/poller.js');
+      
+      const items = [{
+        number: 123,
+        title: 'Test PR',
+        user: { login: 'author' },
+        _mergeable: 'MERGEABLE',
+        _comments: [
+          { user: { login: 'author', type: 'User' }, body: 'Added screenshots' }
+        ]
+      }];
+      
+      const result = computeAttentionLabels(items, {});
+      
+      assert.strictEqual(result[0]._attention_label, 'PR');
+      assert.strictEqual(result[0]._has_attention, false);
+    });
+  });
 });

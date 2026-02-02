@@ -10,7 +10,7 @@
  */
 
 import { loadRepoConfig, getRepoConfig, getAllSources, getToolProviderConfig, resolveRepoForItem, getCleanupTtlDays, getStartupDelay } from "./repo-config.js";
-import { createPoller, pollGenericSource, enrichItemsWithComments } from "./poller.js";
+import { createPoller, pollGenericSource, enrichItemsWithComments, enrichItemsWithMergeable, computeAttentionLabels } from "./poller.js";
 import { evaluateReadiness, sortByPriority } from "./readiness.js";
 import { executeAction, buildCommand } from "./actions.js";
 import { debug } from "./logger.js";
@@ -132,6 +132,18 @@ export async function pollOnce(options = {}) {
         if (source.filter_bot_comments) {
           items = await enrichItemsWithComments(items, source);
           debug(`Enriched ${items.length} items with comments for bot filtering`);
+        }
+        
+        // Enrich items with mergeable status for conflict detection if configured
+        if (source.enrich_mergeable) {
+          items = await enrichItemsWithMergeable(items, source);
+          debug(`Enriched ${items.length} items with mergeable status`);
+        }
+        
+        // Compute attention labels if both enrichments are present (for my-prs-attention)
+        if (source.enrich_mergeable && source.filter_bot_comments) {
+          items = computeAttentionLabels(items, source);
+          debug(`Computed attention labels for ${items.length} items`);
         }
       } catch (err) {
         console.error(`[poll] Error fetching from ${sourceName}: ${err.message}`);

@@ -214,6 +214,77 @@ export function checkBotComments(item, config) {
 }
 
 /**
+ * Check if a PR has merge conflicts
+ * 
+ * This check is only applied when the item has been enriched with `_mergeable`
+ * (the mergeable status from GitHub: "MERGEABLE", "CONFLICTING", or "UNKNOWN").
+ * Items without `_mergeable` are considered ready (check is skipped).
+ * 
+ * Used by the my-prs-conflicts source to filter to only PRs with conflicts.
+ * 
+ * @param {object} item - Item with optional _mergeable field
+ * @param {object} config - Repo config with optional readiness.require_conflicts
+ * @returns {object} { ready: boolean, reason?: string }
+ */
+export function checkMergeable(item, config) {
+  const readinessConfig = config.readiness || {};
+  
+  // Skip check if no _mergeable field (item not enriched)
+  if (!item._mergeable) {
+    return { ready: true };
+  }
+  
+  // Check if we require conflicts (for conflict-detection sources)
+  if (readinessConfig.require_conflicts) {
+    if (item._mergeable === "CONFLICTING") {
+      return { ready: true };
+    }
+    return {
+      ready: false,
+      reason: `PR is ${item._mergeable}, not CONFLICTING`,
+    };
+  }
+  
+  // Default: allow any mergeable status
+  return { ready: true };
+}
+
+/**
+ * Check if a PR needs attention (has conflicts OR human feedback)
+ * 
+ * This check uses the _has_attention field computed by computeAttentionLabels().
+ * Items without _has_attention are considered ready (check is skipped).
+ * 
+ * Used by the my-prs-attention source to filter to PRs needing action.
+ * 
+ * @param {object} item - Item with optional _has_attention field
+ * @param {object} config - Repo config with optional readiness.require_attention
+ * @returns {object} { ready: boolean, reason?: string }
+ */
+export function checkAttention(item, config) {
+  const readinessConfig = config.readiness || {};
+  
+  // Skip check if require_attention not configured
+  if (!readinessConfig.require_attention) {
+    return { ready: true };
+  }
+  
+  // Skip check if _has_attention not computed (item not enriched)
+  if (item._has_attention === undefined) {
+    return { ready: true };
+  }
+  
+  if (item._has_attention) {
+    return { ready: true };
+  }
+  
+  return {
+    ready: false,
+    reason: "PR has no conflicts and no human feedback - no attention needed",
+  };
+}
+
+/**
  * Calculate priority score for an issue
  * @param {object} issue - Issue with labels and created_at
  * @param {object} config - Repo config with readiness settings
@@ -282,6 +353,26 @@ export function evaluateReadiness(issue, config) {
     return {
       ready: false,
       reason: botResult.reason,
+      priority: 0,
+    };
+  }
+
+  // Check mergeable status (for PRs enriched with _mergeable)
+  const mergeableResult = checkMergeable(issue, config);
+  if (!mergeableResult.ready) {
+    return {
+      ready: false,
+      reason: mergeableResult.reason,
+      priority: 0,
+    };
+  }
+
+  // Check attention status (for PRs needing conflicts OR feedback)
+  const attentionResult = checkAttention(issue, config);
+  if (!attentionResult.ready) {
+    return {
+      ready: false,
+      reason: attentionResult.reason,
       priority: 0,
     };
   }

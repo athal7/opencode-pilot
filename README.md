@@ -65,8 +65,11 @@ Three ways to configure sources, from simplest to most flexible:
 
 - `github/my-issues` - Issues assigned to me
 - `github/review-requests` - PRs needing my review
-- `github/my-prs-feedback` - My PRs with change requests
+- `github/my-prs-feedback` - My PRs with comments/feedback (simple trigger)
+- `github/my-prs-attention` - My PRs needing attention (conflicts OR feedback, with dynamic labeling)
 - `linear/my-issues` - Linear tickets (requires `teamId`, `assigneeId`)
+
+**Tip:** Use `my-prs-attention` instead of `my-prs-feedback` if you also want to detect merge conflicts. The session name will indicate which condition(s) triggered it: "Conflicts: {title}", "Feedback: {title}", or "Conflicts+Feedback: {title}".
 
 ### Prompt Templates
 

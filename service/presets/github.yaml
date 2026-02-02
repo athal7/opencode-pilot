@@ -41,7 +41,7 @@ my-prs-feedback:
   name: my-prs-feedback
   tool:
     # comments:>0 filter ensures only PRs with feedback are returned
-    command: ["gh", "search", "prs", "--author=@me", "--state=open", "comments:>0", "--json", "number,title,url,repository,state,body,updatedAt"]
+    command: ["gh", "search", "prs", "--author=@me", "--state=open", "comments:>0", "--json", "number,title,url,repository,state,body,updatedAt,commentsCount"]
   item:
     id: "{url}"
   repo: "{repository.nameWithOwner}"
@@ -50,6 +50,29 @@ my-prs-feedback:
     name: "Feedback: {title}"
   # Reprocess when PR is updated (new commits pushed, new comments, etc.)
   # This ensures we re-trigger after addressing review feedback
+  reprocess_on:
+    - state
+    - updatedAt
+
+my-prs-attention:
+  name: my-prs-attention
+  tool:
+    # Get all open PRs authored by me - we filter by conditions after enrichment
+    command: ["gh", "search", "prs", "--author=@me", "--state=open", "--json", "number,title,url,repository,state,body,updatedAt,commentsCount"]
+  item:
+    id: "{url}"
+  repo: "{repository.nameWithOwner}"
+  prompt: review-feedback
+  session:
+    # Dynamic name showing which conditions triggered (set by enrichment)
+    name: "{_attention_label}: {title}"
+  # Enrich with both mergeable status and comments to detect all attention conditions
+  enrich_mergeable: true
+  filter_bot_comments: true
+  readiness:
+    # Require at least one attention condition (conflicts or human feedback)
+    require_attention: true
+  # Reprocess when PR is updated
   reprocess_on:
     - state
     - updatedAt
