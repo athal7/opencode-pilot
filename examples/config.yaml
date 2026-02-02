@@ -6,6 +6,16 @@
 # to this port. If not set, pilot discovers servers automatically.
 # server_port: 4096
 
+# Startup delay in milliseconds before first poll (default: 10000)
+# Allows OpenCode server time to fully initialize after restart.
+# Set to 0 for immediate polling.
+# startup_delay: 10000
+
+# Directory containing your git repos - enables auto-discovery
+# Pilot scans for repos by checking git remotes (origin and upstream)
+# This means PRs from upstream forks will match your local clones
+repos_dir: ~/code
+
 defaults:
   agent: plan
   prompt: default
@@ -68,7 +78,8 @@ sources:
 #       title: name
 #       body: notes
 
-# Map repos to local paths
+# Explicit repo mappings (overrides repos_dir auto-discovery)
+# Only needed if a repo isn't in repos_dir or needs custom settings
 # repos:
 #   myorg/backend:
 #     path: ~/code/backend

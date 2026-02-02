@@ -46,10 +46,12 @@ See [examples/config.yaml](examples/config.yaml) for a complete example with all
 ### Key Sections
 
 - **`server_port`** - Preferred OpenCode server port (e.g., `4096`). When multiple OpenCode instances are running, pilot attaches sessions to this port.
+- **`startup_delay`** - Milliseconds to wait before first poll (default: `10000`). Allows OpenCode server time to fully initialize after restart.
+- **`repos_dir`** - Directory containing git repos (e.g., `~/code`). Pilot auto-discovers repos by scanning git remotes (both `origin` and `upstream` for fork support).
 - **`defaults`** - Default values applied to all sources
 - **`sources`** - What to poll (presets, shorthand, or full config)
 - **`tools`** - Field mappings to normalize different MCP APIs
-- **`repos`** - Repository paths and settings (use YAML anchors to share config)
+- **`repos`** - Explicit repository paths (overrides auto-discovery from `repos_dir`)
 
 ### Source Syntax
 
