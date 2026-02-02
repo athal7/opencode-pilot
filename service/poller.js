@@ -12,7 +12,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { getNestedValue } from "./utils.js";
+import { getNestedValue, hasNonBotFeedback } from "./utils.js";
 
 /**
  * Expand template string with item fields
@@ -502,6 +502,22 @@ export async function fetchGitHubComments(item, options = {}) {
 }
 
 /**
+ * Check if a source is a GitHub source (MCP or CLI-based)
+ * @param {object} source - Source configuration
+ * @returns {boolean} True if this is a GitHub source
+ */
+function isGitHubSource(source) {
+  // MCP-based GitHub source
+  if (source.tool?.mcp === "github") return true;
+  
+  // CLI-based GitHub source (uses gh command)
+  const command = source.tool?.command;
+  if (Array.isArray(command) && command[0] === "gh") return true;
+  
+  return false;
+}
+
+/**
  * Enrich items with comments for bot filtering
  * 
  * For items from sources with filter_bot_comments: true, fetches comments
@@ -514,7 +530,7 @@ export async function fetchGitHubComments(item, options = {}) {
  */
 export async function enrichItemsWithComments(items, source, options = {}) {
   // Skip if not configured or not a GitHub source
-  if (!source.filter_bot_comments || source.tool?.mcp !== "github") {
+  if (!source.filter_bot_comments || !isGitHubSource(source)) {
     return items;
   }
   
@@ -618,16 +634,11 @@ export function computeAttentionLabels(items, source) {
       reasons.push('Conflicts');
     }
     
-    // Check for human feedback (non-bot, non-author comments)
+    // Check for human feedback using the shared hasNonBotFeedback utility
+    // This properly handles known bots like 'linear' that don't have [bot] suffix
     if (item._comments && item._comments.length > 0) {
       const authorUsername = item.user?.login || item.author?.login;
-      const hasHumanFeedback = item._comments.some(comment => {
-        const commenter = comment.user?.login || comment.author?.login;
-        const isBot = commenter?.includes('[bot]') || comment.user?.type === 'Bot';
-        const isAuthor = commenter === authorUsername;
-        return !isBot && !isAuthor;
-      });
-      if (hasHumanFeedback) {
+      if (hasNonBotFeedback(item._comments, authorUsername)) {
         reasons.push('Feedback');
       }
     }

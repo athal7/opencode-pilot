@@ -1013,5 +1013,25 @@ describe('poller.js', () => {
       assert.strictEqual(result[0]._attention_label, 'PR');
       assert.strictEqual(result[0]._has_attention, false);
     });
+
+    test('ignores known bots without [bot] suffix (e.g., linear)', async () => {
+      const { computeAttentionLabels } = await import('../../service/poller.js');
+      
+      const items = [{
+        number: 123,
+        title: 'Test PR',
+        user: { login: 'author' },
+        _mergeable: 'MERGEABLE',
+        _comments: [
+          // Linear bot posts linkback comments without [bot] suffix
+          { user: { login: 'linear', type: 'User' }, body: '<!-- linear-linkback -->' }
+        ]
+      }];
+      
+      const result = computeAttentionLabels(items, {});
+      
+      assert.strictEqual(result[0]._attention_label, 'PR');
+      assert.strictEqual(result[0]._has_attention, false);
+    });
   });
 });

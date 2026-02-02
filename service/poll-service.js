@@ -124,7 +124,12 @@ export async function pollOnce(options = {}) {
     // Fetch items from source
     if (!skipMcp) {
       try {
-        toolProviderConfig = getToolProviderConfig(source.tool.mcp);
+        // Get provider config - for MCP sources use source.tool.mcp, for CLI sources detect provider
+        let provider = source.tool.mcp;
+        if (!provider && Array.isArray(source.tool?.command) && source.tool.command[0] === 'gh') {
+          provider = 'github'; // CLI-based GitHub source
+        }
+        toolProviderConfig = getToolProviderConfig(provider);
         items = await pollGenericSource(source, { toolProviderConfig });
         debug(`Fetched ${items.length} items from ${sourceName}`);
         
