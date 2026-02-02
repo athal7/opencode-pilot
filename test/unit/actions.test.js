@@ -160,137 +160,32 @@ describe('actions.js', () => {
 
   });
 
-  describe('getCommandInfoNew', () => {
-    test('builds command with all options', async () => {
-      writeFileSync(join(templatesDir, 'default.md'), '{title}\n\n{body}');
+  describe('buildCommand', () => {
+    test('builds display string for API call', async () => {
+      const { buildCommand } = await import('../../service/actions.js');
       
-      const { getCommandInfoNew } = await import('../../service/actions.js');
-      
-      const item = { number: 123, title: 'Fix bug', body: 'Details' };
+      const item = { number: 123, title: 'Fix bug' };
       const config = {
         path: '~/code/backend',
-        prompt: 'default',
-        agent: 'coder',
         session: { name: 'issue-{number}' }
       };
       
-      const cmdInfo = getCommandInfoNew(item, config, templatesDir);
+      const result = buildCommand(item, config);
       
-      assert.strictEqual(cmdInfo.cwd, join(homedir(), 'code/backend'));
-      assert.ok(cmdInfo.args.includes('opencode'));
-      assert.ok(cmdInfo.args.includes('run'));
-      assert.ok(cmdInfo.args.includes('--title'));
-      assert.ok(cmdInfo.args.includes('issue-123'));
-      assert.ok(cmdInfo.args.includes('--agent'));
-      assert.ok(cmdInfo.args.includes('coder'));
+      assert.ok(result.includes('[API]'), 'Should indicate API call');
+      assert.ok(result.includes('/session'), 'Should include session endpoint');
+      assert.ok(result.includes('issue-123'), 'Should include expanded session name');
     });
 
-    test('uses working_dir when no path', async () => {
-      const { getCommandInfoNew } = await import('../../service/actions.js');
-      
-      const item = { id: 'reminder-1', title: 'Do something' };
-      const config = {
-        working_dir: '~/scratch',
-        prompt: 'default'
-      };
-      
-      const cmdInfo = getCommandInfoNew(item, config, templatesDir);
-      
-      assert.strictEqual(cmdInfo.cwd, join(homedir(), 'scratch'));
-    });
-
-    test('defaults to home dir when no path or working_dir', async () => {
-      const { getCommandInfoNew } = await import('../../service/actions.js');
+    test('shows (no path) when path not configured', async () => {
+      const { buildCommand } = await import('../../service/actions.js');
       
       const item = { title: 'Do something' };
       const config = { prompt: 'default' };
       
-      const cmdInfo = getCommandInfoNew(item, config, templatesDir);
+      const result = buildCommand(item, config);
       
-      assert.strictEqual(cmdInfo.cwd, homedir());
-    });
-
-    test('includes prompt from template as message', async () => {
-      writeFileSync(join(templatesDir, 'devcontainer.md'), '/devcontainer issue-{number}\n\n{title}\n\n{body}');
-      
-      const { getCommandInfoNew } = await import('../../service/actions.js');
-      
-      const item = { number: 66, title: 'Fix bug', body: 'Details' };
-      const config = {
-        path: '~/code/backend',
-        prompt: 'devcontainer'
-      };
-      
-      const cmdInfo = getCommandInfoNew(item, config, templatesDir);
-      
-      // Should NOT have --command flag (slash command is in template)
-      assert.ok(!cmdInfo.args.includes('--command'), 'Should not include --command flag');
-      
-      // Prompt should include the /devcontainer command
-      const lastArg = cmdInfo.args[cmdInfo.args.length - 1];
-      assert.ok(lastArg.includes('/devcontainer issue-66'), 'Prompt should include /devcontainer command');
-      assert.ok(lastArg.includes('Fix bug'), 'Prompt should include title');
-    });
-
-    test('includes --attach when serverUrl is provided', async () => {
-      const { getCommandInfoNew } = await import('../../service/actions.js');
-      
-      const item = { number: 123, title: 'Fix bug' };
-      const config = {
-        path: '~/code/backend',
-        prompt: 'default'
-      };
-      
-      const cmdInfo = getCommandInfoNew(item, config, templatesDir, 'http://localhost:4096');
-      
-      assert.ok(cmdInfo.args.includes('--attach'), 'Should include --attach flag');
-      assert.ok(cmdInfo.args.includes('http://localhost:4096'), 'Should include server URL');
-    });
-
-    test('does not include --attach when serverUrl is null', async () => {
-      const { getCommandInfoNew } = await import('../../service/actions.js');
-      
-      const item = { number: 123, title: 'Fix bug' };
-      const config = {
-        path: '~/code/backend',
-        prompt: 'default'
-      };
-      
-      const cmdInfo = getCommandInfoNew(item, config, templatesDir, null);
-      
-      assert.ok(!cmdInfo.args.includes('--attach'), 'Should not include --attach flag');
-    });
-
-    test('uses item title as session name when no session.name configured', async () => {
-      const { getCommandInfoNew } = await import('../../service/actions.js');
-      
-      const item = { id: 'reminder-123', title: 'Review quarterly reports' };
-      const config = {
-        path: '~/code/backend',
-        prompt: 'default'
-      };
-      
-      const cmdInfo = getCommandInfoNew(item, config, templatesDir);
-      
-      const titleIndex = cmdInfo.args.indexOf('--title');
-      assert.ok(titleIndex !== -1, 'Should have --title flag');
-      assert.strictEqual(cmdInfo.args[titleIndex + 1], 'Review quarterly reports', 'Should use item title as session name');
-    });
-
-    test('falls back to timestamp when no session.name and no title', async () => {
-      const { getCommandInfoNew } = await import('../../service/actions.js');
-      
-      const item = { id: 'item-123' };
-      const config = {
-        path: '~/code/backend',
-        prompt: 'default'
-      };
-      
-      const cmdInfo = getCommandInfoNew(item, config, templatesDir);
-      
-      const titleIndex = cmdInfo.args.indexOf('--title');
-      assert.ok(titleIndex !== -1, 'Should have --title flag');
-      assert.ok(cmdInfo.args[titleIndex + 1].startsWith('session-'), 'Should fall back to session-{timestamp}');
+      assert.ok(result.includes('(no path)'), 'Should indicate missing path');
     });
   });
 
@@ -567,6 +462,48 @@ describe('actions.js', () => {
       
       assert.strictEqual(result.success, false, 'Should fail when no server');
       assert.ok(result.error.includes('No OpenCode server'), 'Should have descriptive error');
+    });
+
+    test('skips item when no local path is configured', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      
+      const item = { number: 123, title: 'PR from unknown fork' };
+      // Config with no path/working_dir - simulates unknown repo
+      const config = {
+        prompt: 'default'
+        // Note: no path, working_dir, or repo_path - simulates unknown repo
+      };
+      
+      const result = await executeAction(item, config, { dryRun: true });
+      
+      assert.strictEqual(result.success, false, 'Should fail when no path configured');
+      assert.strictEqual(result.skipped, true, 'Should mark as skipped');
+      assert.ok(result.error.includes('No local path configured'), 'Should have descriptive error');
+    });
+
+    test('allows any path when working_dir is explicitly set', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      const os = await import('os');
+      
+      const item = { number: 123, title: 'Global task' };
+      // Explicit working_dir to home - user intentionally wants this
+      const config = {
+        working_dir: os.homedir(),
+        prompt: 'default'
+      };
+      
+      // Mock server discovery
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      
+      // Should not skip because working_dir is explicitly set
+      const result = await executeAction(item, config, { 
+        dryRun: true,
+        discoverServer: mockDiscoverServer,
+        fetch: async () => ({ ok: false, text: async () => 'Not found' })
+      });
+      
+      // It won't succeed (no valid session endpoint mock) but it shouldn't be skipped
+      assert.notStrictEqual(result.skipped, true, 'Should NOT skip when working_dir is explicit');
     });
 
     test('creates new worktree when worktree: "new" is configured (dry run)', async () => {
