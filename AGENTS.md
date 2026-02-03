@@ -61,13 +61,14 @@ npx opencode-pilot status
 
 ## Configuration
 
-Config file: `~/.config/opencode-pilot/config.yaml`
+Config file: `~/.config/opencode/pilot/config.yaml`
 
 Configuration has these sections:
-- `tools` - field mappings for MCP servers
-- `sources` - polling sources with generic MCP tool references
-- `repos` - per-repository settings (use YAML anchors to share config)
+- `defaults` - default values applied to all sources
+- `repos_dir` - directory to auto-discover repos via git remotes
+- `sources` - polling sources with presets, shorthand, or full MCP tool config
+- `tools` - field mappings to normalize different MCP APIs
 
-Template files: `~/.config/opencode-pilot/templates/*.md`
+Template files: `~/.config/opencode/pilot/templates/*.md`
 
 See [examples/config.yaml](examples/config.yaml) for a complete example.
