@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url'
 import { homedir } from 'os'
 import { join } from 'path'
 import YAML from 'yaml'
+import { getVersion } from './version.js'
 
 // Default configuration
 const DEFAULT_HTTP_PORT = 4097
@@ -56,10 +57,11 @@ function createHttpServer_(port) {
       return
     }
     
-    // GET /health - Health check
+    // GET /health - Health check with version
     if (req.method === 'GET' && url.pathname === '/health') {
-      res.writeHead(200, { 'Content-Type': 'text/plain' })
-      res.end('OK')
+      const version = getVersion()
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ status: 'ok', version }))
       return
     }
     

@@ -13,7 +13,7 @@
 
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
 import os from "os";
 import YAML from "yaml";
@@ -39,11 +39,72 @@ function findServiceDir() {
 const serviceDir = findServiceDir();
 
 // Paths
-const PILOT_CONFIG_FILE = join(os.homedir(), ".config/opencode/pilot/config.yaml");
-const PILOT_TEMPLATES_DIR = join(os.homedir(), ".config/opencode/pilot/templates");
+const PILOT_CONFIG_DIR = join(os.homedir(), ".config/opencode/pilot");
+const PILOT_CONFIG_FILE = join(PILOT_CONFIG_DIR, "config.yaml");
+const PILOT_TEMPLATES_DIR = join(PILOT_CONFIG_DIR, "templates");
+const PILOT_PID_FILE = join(PILOT_CONFIG_DIR, "pilot.pid");
 
 // Default port
 const DEFAULT_PORT = 4097;
+
+/**
+ * Write PID file
+ */
+function writePidFile() {
+  try {
+    mkdirSync(PILOT_CONFIG_DIR, { recursive: true });
+    writeFileSync(PILOT_PID_FILE, String(process.pid));
+  } catch (err) {
+    console.warn(`[opencode-pilot] Could not write PID file: ${err.message}`);
+  }
+}
+
+/**
+ * Remove PID file
+ */
+function removePidFile() {
+  try {
+    if (existsSync(PILOT_PID_FILE)) {
+      unlinkSync(PILOT_PID_FILE);
+    }
+  } catch {
+    // Ignore errors on cleanup
+  }
+}
+
+/**
+ * Read PID from file
+ * @returns {number|null} PID or null if not found/invalid
+ */
+function readPidFile() {
+  try {
+    if (existsSync(PILOT_PID_FILE)) {
+      const content = readFileSync(PILOT_PID_FILE, "utf8").trim();
+      const pid = parseInt(content, 10);
+      if (!isNaN(pid) && pid > 0) {
+        return pid;
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
+  return null;
+}
+
+/**
+ * Check if a process is running
+ * @param {number} pid - Process ID
+ * @returns {boolean} True if process is running
+ */
+function isProcessRunning(pid) {
+  try {
+    // Signal 0 doesn't kill, just checks if process exists
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Load port from config file
@@ -114,7 +175,8 @@ Usage:
 
 Commands:
   start                Start the polling service (foreground)
-  status               Show service status
+  stop                 Stop the running service
+  status               Show service status and version
   config               Validate and show configuration
   clear                Clear processed state entries
   test-source NAME     Test a source by fetching items and showing mappings
@@ -133,7 +195,8 @@ The service handles:
 
 Examples:
   opencode-pilot start                   # Start service (foreground)
-  opencode-pilot status                  # Check status
+  opencode-pilot stop                    # Stop the service
+  opencode-pilot status                  # Check status and version
   opencode-pilot config                  # Validate and show config
   opencode-pilot clear --all             # Clear all processed state
   opencode-pilot clear --expired         # Clear expired entries
@@ -157,6 +220,9 @@ async function startCommand() {
 
   console.log("[opencode-pilot] Starting polling service...");
   
+  // Write PID file
+  writePidFile();
+  
   // Dynamic import of the service module
   const { startService, stopService } = await import(serverPath);
   
@@ -167,29 +233,91 @@ async function startCommand() {
   const service = await startService(config);
   
   // Handle graceful shutdown
-  process.on("SIGTERM", async () => {
-    console.log("[opencode-pilot] Received SIGTERM, shutting down...");
+  const shutdown = async (signal) => {
+    console.log(`[opencode-pilot] Received ${signal}, shutting down...`);
+    removePidFile();
     await stopService(service);
     process.exit(0);
-  });
+  };
   
-  process.on("SIGINT", async () => {
-    console.log("[opencode-pilot] Received SIGINT, shutting down...");
-    await stopService(service);
-    process.exit(0);
-  });
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
   
   // Keep running until signal received
   await new Promise(() => {});
 }
 
 // ============================================================================
+// Stop Command
+// ============================================================================
+
+function stopCommand() {
+  const pid = readPidFile();
+  
+  if (!pid) {
+    console.log("Service is not running (no PID file found)");
+    process.exit(0);
+  }
+  
+  if (!isProcessRunning(pid)) {
+    console.log(`Service is not running (stale PID file for pid ${pid})`);
+    removePidFile();
+    process.exit(0);
+  }
+  
+  console.log(`Stopping opencode-pilot (pid ${pid})...`);
+  
+  try {
+    process.kill(pid, "SIGTERM");
+    
+    // Wait for process to exit (up to 5 seconds)
+    let attempts = 0;
+    const maxAttempts = 50;
+    const checkInterval = 100;
+    
+    const waitForExit = () => {
+      if (!isProcessRunning(pid)) {
+        console.log("Service stopped");
+        process.exit(0);
+      }
+      
+      attempts++;
+      if (attempts >= maxAttempts) {
+        console.log("Service did not stop gracefully, sending SIGKILL...");
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // Process may have exited
+        }
+        removePidFile();
+        console.log("Service killed");
+        process.exit(0);
+      }
+      
+      setTimeout(waitForExit, checkInterval);
+    };
+    
+    setTimeout(waitForExit, checkInterval);
+  } catch (err) {
+    if (err.code === "ESRCH") {
+      console.log("Service is not running");
+      removePidFile();
+    } else {
+      console.error(`Failed to stop service: ${err.message}`);
+      process.exit(1);
+    }
+  }
+}
+
+// ============================================================================
 // Status Command
 // ============================================================================
 
-function statusCommand() {
-  console.log("opencode-pilot status");
-  console.log("=====================");
+async function statusCommand() {
+  const { getVersion } = await import(join(serviceDir, "version.js"));
+  const version = getVersion();
+  console.log(`opencode-pilot v${version}`);
+  console.log("=".repeat(`opencode-pilot v${version}`.length));
   console.log("");
 
   // Service running? Check if HTTP responds
@@ -702,8 +830,12 @@ async function main() {
       await startCommand();
       break;
 
+    case "stop":
+      stopCommand();
+      break;
+
     case "status":
-      statusCommand();
+      await statusCommand();
       break;
 
     case "config":

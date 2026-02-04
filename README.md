@@ -31,7 +31,7 @@ npm install -g opencode-pilot
    }
    ```
 
-   The daemon will auto-start when OpenCode launches.
+   The daemon will auto-start when OpenCode launches. If a newer version of the plugin is installed, the daemon will automatically restart to pick up the new version.
 
    Or start manually:
 
@@ -117,7 +117,8 @@ sources:
 
 ```bash
 opencode-pilot start              # Start the service (foreground)
-opencode-pilot status             # Check status
+opencode-pilot stop               # Stop the running service
+opencode-pilot status             # Show version and service status
 opencode-pilot config             # Validate and show config
 opencode-pilot clear              # Show state summary
 opencode-pilot clear --all        # Clear all processed state
