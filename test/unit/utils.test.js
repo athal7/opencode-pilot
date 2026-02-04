@@ -71,12 +71,69 @@ describe('utils.js', () => {
       assert.strictEqual(hasNonBotFeedback(comments, 'athal7'), false);
     });
 
-    test('returns false when only author has commented', async () => {
+    test('returns false when only author has top-level comments', async () => {
       const { hasNonBotFeedback } = await import('../../service/utils.js');
       
+      // Top-level comments from author (no state, no path) are ignored
       const comments = [
         { user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'CI passed' },
         { user: { login: 'athal7', type: 'User' }, body: 'Added screenshots' },
+      ];
+      
+      assert.strictEqual(hasNonBotFeedback(comments, 'athal7'), false);
+    });
+
+    test('returns true when author has submitted a PR review (self-review)', async () => {
+      const { hasNonBotFeedback } = await import('../../service/utils.js');
+      
+      // PR reviews from author (have state field) ARE actionable - self-review feedback
+      const comments = [
+        { user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'CI passed' },
+        { user: { login: 'athal7', type: 'User' }, state: 'COMMENTED', body: 'TODO: add tests' },
+      ];
+      
+      assert.strictEqual(hasNonBotFeedback(comments, 'athal7'), true);
+    });
+
+    test('returns true when author has standalone inline comment', async () => {
+      const { hasNonBotFeedback } = await import('../../service/utils.js');
+      
+      // Standalone inline comments from author (have path, no in_reply_to_id) ARE actionable
+      const comments = [
+        { 
+          user: { login: 'athal7', type: 'User' }, 
+          body: 'Need to refactor this', 
+          path: 'src/index.js',
+          diff_hunk: '@@ -1,3 +1,4 @@',
+        },
+      ];
+      
+      assert.strictEqual(hasNonBotFeedback(comments, 'athal7'), true);
+    });
+
+    test('returns false when author has reply inline comment', async () => {
+      const { hasNonBotFeedback } = await import('../../service/utils.js');
+      
+      // Reply inline comments from author (have in_reply_to_id) are ignored
+      const comments = [
+        { 
+          user: { login: 'athal7', type: 'User' }, 
+          body: 'Fixed!', 
+          path: 'src/index.js',
+          diff_hunk: '@@ -1,3 +1,4 @@',
+          in_reply_to_id: 12345,
+        },
+      ];
+      
+      assert.strictEqual(hasNonBotFeedback(comments, 'athal7'), false);
+    });
+
+    test('returns false when author self-approves with no feedback', async () => {
+      const { hasNonBotFeedback } = await import('../../service/utils.js');
+      
+      // Author's approval-only (no body) should not trigger
+      const comments = [
+        { user: { login: 'athal7', type: 'User' }, state: 'APPROVED', body: '' },
       ];
       
       assert.strictEqual(hasNonBotFeedback(comments, 'athal7'), false);
@@ -170,6 +227,66 @@ describe('utils.js', () => {
       // Issue comments don't have state field
       assert.strictEqual(isApprovalOnly({ body: 'Please address this' }), false);
       assert.strictEqual(isApprovalOnly({}), false);
+    });
+  });
+
+  describe('isPrReview', () => {
+    test('returns true for objects with state field', async () => {
+      const { isPrReview } = await import('../../service/utils.js');
+      
+      assert.strictEqual(isPrReview({ state: 'APPROVED' }), true);
+      assert.strictEqual(isPrReview({ state: 'CHANGES_REQUESTED' }), true);
+      assert.strictEqual(isPrReview({ state: 'COMMENTED' }), true);
+    });
+
+    test('returns false for objects without state field', async () => {
+      const { isPrReview } = await import('../../service/utils.js');
+      
+      assert.strictEqual(isPrReview({ body: 'Comment' }), false);
+      assert.strictEqual(isPrReview({}), false);
+      // null/undefined returns falsy (null), which is fine for boolean checks
+      assert.ok(!isPrReview(null));
+      assert.ok(!isPrReview(undefined));
+    });
+  });
+
+  describe('isInlineComment', () => {
+    test('returns true for comments with path field', async () => {
+      const { isInlineComment } = await import('../../service/utils.js');
+      
+      assert.strictEqual(isInlineComment({ path: 'src/index.js', body: 'Fix this' }), true);
+    });
+
+    test('returns true for comments with diff_hunk field', async () => {
+      const { isInlineComment } = await import('../../service/utils.js');
+      
+      assert.strictEqual(isInlineComment({ diff_hunk: '@@ -1,3 +1,4 @@', body: 'Nice' }), true);
+    });
+
+    test('returns false for top-level comments', async () => {
+      const { isInlineComment } = await import('../../service/utils.js');
+      
+      assert.strictEqual(isInlineComment({ body: 'Great work!' }), false);
+      assert.strictEqual(isInlineComment({}), false);
+      assert.strictEqual(isInlineComment(null), false);
+    });
+  });
+
+  describe('isReply', () => {
+    test('returns true for comments with in_reply_to_id', async () => {
+      const { isReply } = await import('../../service/utils.js');
+      
+      assert.strictEqual(isReply({ in_reply_to_id: 12345 }), true);
+      assert.strictEqual(isReply({ in_reply_to_id: 0 }), true);
+    });
+
+    test('returns false for standalone comments', async () => {
+      const { isReply } = await import('../../service/utils.js');
+      
+      assert.strictEqual(isReply({ body: 'Standalone' }), false);
+      assert.strictEqual(isReply({ in_reply_to_id: null }), false);
+      assert.strictEqual(isReply({ in_reply_to_id: undefined }), false);
+      assert.strictEqual(isReply(null), false);
     });
   });
 

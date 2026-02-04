@@ -438,20 +438,53 @@ async function fetchPrReviewCommentsViaCli(owner, repo, number, timeout) {
 }
 
 /**
+ * Fetch PR reviews using gh CLI
+ * 
+ * Fetches formal PR reviews (APPROVED, CHANGES_REQUESTED, COMMENTED state).
+ * These are separate from inline comments and issue comments.
+ * 
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {number} number - PR number
+ * @param {number} timeout - Timeout in ms
+ * @returns {Promise<Array>} Array of review objects with user, state, body
+ */
+async function fetchPrReviewsViaCli(owner, repo, number, timeout) {
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+  
+  try {
+    const { stdout } = await Promise.race([
+      execAsync(`gh api repos/${owner}/${repo}/pulls/${number}/reviews`),
+      createTimeout(timeout, "gh api call for PR reviews"),
+    ]);
+    
+    const reviews = JSON.parse(stdout);
+    return Array.isArray(reviews) ? reviews : [];
+  } catch (err) {
+    console.error(`[poller] Error fetching PR reviews via gh: ${err.message}`);
+    return [];
+  }
+}
+
+/**
  * Fetch comments for a GitHub issue/PR and enrich the item
  * 
- * Fetches BOTH types of comments using gh CLI:
+ * Fetches THREE types of feedback using gh CLI:
  * 1. PR review comments (inline code comments) via gh api pulls/{number}/comments
  * 2. Issue comments (conversation thread) via gh api issues/{number}/comments
+ * 3. PR reviews (formal reviews) via gh api pulls/{number}/reviews
  * 
  * This is necessary because:
  * - Bots like Linear post to issue comments, not PR review comments
  * - Human reviewers post inline feedback as PR review comments
+ * - Formal PR reviews (APPROVED, CHANGES_REQUESTED, COMMENTED) are stored separately
  * 
  * @param {object} item - Item with repository_full_name and number fields
  * @param {object} [options] - Options
  * @param {number} [options.timeout] - Timeout in ms (default: 30000)
- * @returns {Promise<Array>} Array of comment objects (merged from both endpoints)
+ * @returns {Promise<Array>} Array of comment/review objects (merged from all endpoints)
  */
 export async function fetchGitHubComments(item, options = {}) {
   const timeout = options.timeout || DEFAULT_MCP_TIMEOUT;
@@ -473,16 +506,18 @@ export async function fetchGitHubComments(item, options = {}) {
   }
   
   try {
-    // Fetch both PR review comments AND issue comments in parallel via gh CLI
-    const [prComments, issueComments] = await Promise.all([
+    // Fetch PR review comments, issue comments, AND PR reviews in parallel via gh CLI
+    const [prComments, issueComments, prReviews] = await Promise.all([
       // PR review comments (inline code comments from reviewers)
       fetchPrReviewCommentsViaCli(owner, repo, number, timeout),
       // Issue comments (conversation thread where Linear bot posts)
       fetchIssueCommentsViaCli(owner, repo, number, timeout),
+      // PR reviews (formal reviews: APPROVED, CHANGES_REQUESTED, COMMENTED)
+      fetchPrReviewsViaCli(owner, repo, number, timeout),
     ]);
     
-    // Return merged comments from both sources
-    return [...prComments, ...issueComments];
+    // Return merged feedback from all sources
+    return [...prComments, ...issueComments, ...prReviews];
   } catch (err) {
     console.error(`[poller] Error fetching comments: ${err.message}`);
     return [];

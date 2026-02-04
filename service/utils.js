@@ -70,17 +70,64 @@ export function isBot(username, type) {
 }
 
 /**
- * Check if a PR/issue has non-bot feedback (comments from humans other than the author)
+ * Check if feedback is a PR review (has state field from /pulls/{number}/reviews)
+ * 
+ * PR reviews have a state field: APPROVED, CHANGES_REQUESTED, COMMENTED, PENDING, DISMISSED
+ * Regular comments (from /issues/{number}/comments or /pulls/{number}/comments) don't have state.
+ * 
+ * @param {object} feedback - Comment or review object
+ * @returns {boolean} True if this is a PR review (not a regular comment)
+ */
+export function isPrReview(feedback) {
+  return feedback && typeof feedback.state === 'string';
+}
+
+/**
+ * Check if feedback is an inline PR comment (from /pulls/{number}/comments)
+ * 
+ * Inline comments have path, position, or diff_hunk fields that top-level comments don't have.
+ * They may also have in_reply_to_id if they're replies to other inline comments.
+ * 
+ * @param {object} feedback - Comment or review object
+ * @returns {boolean} True if this is an inline PR comment
+ */
+export function isInlineComment(feedback) {
+  if (!feedback) return false;
+  // Inline comments have path (file path) and usually diff_hunk or position
+  return typeof feedback.path === 'string' || typeof feedback.diff_hunk === 'string';
+}
+
+/**
+ * Check if feedback is a reply to another comment
+ * 
+ * @param {object} feedback - Comment or review object
+ * @returns {boolean} True if this is a reply
+ */
+export function isReply(feedback) {
+  if (!feedback) return false;
+  // PR review comments use in_reply_to_id for replies
+  return feedback.in_reply_to_id !== undefined && feedback.in_reply_to_id !== null;
+}
+
+/**
+ * Check if a PR/issue has actionable feedback
  * 
  * Used to filter out PRs where only bots have commented, since those don't
- * require the author's attention for human feedback.
+ * require the author's attention.
  * 
- * Also skips approval-only reviews (APPROVED state with no body text) since
- * approvals don't require action from the author.
+ * Logic for author's own feedback:
+ * - Author's inline comments (standalone) → trigger (self-review on code)
+ * - Author's inline comments (replies) → ignore (responding to reviewer)
+ * - Author's PR reviews → trigger (formal self-review)
+ * - Author's top-level comments → ignore (conversation noise)
  * 
- * @param {Array} comments - Array of comment objects with user.login and user.type
+ * Logic for others' feedback:
+ * - Bot comments → ignore
+ * - Human comments/reviews → trigger (except approval-only with no body)
+ * 
+ * @param {Array} comments - Array of comment/review objects with user.login and user.type
  * @param {string} authorUsername - Username of the PR/issue author
- * @returns {boolean} True if there's at least one non-bot, non-author, actionable comment
+ * @returns {boolean} True if there's at least one actionable feedback item
  */
 export function hasNonBotFeedback(comments, authorUsername) {
   // Handle null/undefined/empty
@@ -97,16 +144,30 @@ export function hasNonBotFeedback(comments, authorUsername) {
     const username = user.login;
     const userType = user.type;
     
-    // Skip if it's a bot
+    // Skip if it's a bot (but Copilot is NOT in bot list, so Copilot reviews are kept)
     if (isBot(username, userType)) continue;
     
-    // Skip if it's the author themselves
-    if (authorLower && username?.toLowerCase() === authorLower) continue;
+    // For author's own feedback, apply special rules
+    if (authorLower && username?.toLowerCase() === authorLower) {
+      // Author's PR reviews → trigger
+      if (isPrReview(comment)) {
+        // Continue to check if it's actionable (not approval-only)
+      }
+      // Author's inline comments (standalone only) → trigger
+      else if (isInlineComment(comment)) {
+        if (isReply(comment)) continue; // Skip replies
+        // Standalone inline comment - continue to actionable check
+      }
+      // Author's top-level comments → ignore
+      else {
+        continue;
+      }
+    }
     
     // Skip approval-only reviews (no actionable feedback)
     if (isApprovalOnly(comment)) continue;
     
-    // Found a non-bot, non-author, actionable comment
+    // Found actionable feedback
     return true;
   }
   
