@@ -97,6 +97,96 @@ describe('actions.js', () => {
     });
   });
 
+  describe('parseSlashCommand', () => {
+    test('parses /review command with URL argument', async () => {
+      const { parseSlashCommand } = await import('../../service/actions.js');
+      
+      const result = parseSlashCommand('/review https://github.com/org/repo/pull/123');
+      
+      assert.strictEqual(result.command, 'review');
+      assert.strictEqual(result.arguments, 'https://github.com/org/repo/pull/123');
+      assert.strictEqual(result.rest, '');
+    });
+
+    test('parses /devcontainer command with URL argument', async () => {
+      const { parseSlashCommand } = await import('../../service/actions.js');
+      
+      const result = parseSlashCommand('/devcontainer https://github.com/org/repo/issues/456');
+      
+      assert.strictEqual(result.command, 'devcontainer');
+      assert.strictEqual(result.arguments, 'https://github.com/org/repo/issues/456');
+      assert.strictEqual(result.rest, '');
+    });
+
+    test('parses command with multiline rest content', async () => {
+      const { parseSlashCommand } = await import('../../service/actions.js');
+      
+      const prompt = `/review https://github.com/org/repo/pull/123
+
+Review this pull request:
+
+Check for bugs and security issues.`;
+      
+      const result = parseSlashCommand(prompt);
+      
+      assert.strictEqual(result.command, 'review');
+      assert.strictEqual(result.arguments, 'https://github.com/org/repo/pull/123');
+      assert.ok(result.rest.includes('Review this pull request'));
+      assert.ok(result.rest.includes('Check for bugs'));
+    });
+
+    test('parses command without arguments', async () => {
+      const { parseSlashCommand } = await import('../../service/actions.js');
+      
+      const result = parseSlashCommand('/help');
+      
+      assert.strictEqual(result.command, 'help');
+      assert.strictEqual(result.arguments, '');
+      assert.strictEqual(result.rest, '');
+    });
+
+    test('parses command with hyphen in name', async () => {
+      const { parseSlashCommand } = await import('../../service/actions.js');
+      
+      const result = parseSlashCommand('/my-custom-command arg1 arg2');
+      
+      assert.strictEqual(result.command, 'my-custom-command');
+      assert.strictEqual(result.arguments, 'arg1 arg2');
+    });
+
+    test('returns null for regular prompt without slash', async () => {
+      const { parseSlashCommand } = await import('../../service/actions.js');
+      
+      const result = parseSlashCommand('Fix the bug in the login page');
+      
+      assert.strictEqual(result, null);
+    });
+
+    test('returns null for prompt with slash in middle', async () => {
+      const { parseSlashCommand } = await import('../../service/actions.js');
+      
+      const result = parseSlashCommand('Check the path/to/file for issues');
+      
+      assert.strictEqual(result, null);
+    });
+
+    test('returns null for empty string', async () => {
+      const { parseSlashCommand } = await import('../../service/actions.js');
+      
+      assert.strictEqual(parseSlashCommand(''), null);
+      assert.strictEqual(parseSlashCommand(null), null);
+      assert.strictEqual(parseSlashCommand(undefined), null);
+    });
+
+    test('returns null for just a slash', async () => {
+      const { parseSlashCommand } = await import('../../service/actions.js');
+      
+      const result = parseSlashCommand('/');
+      
+      assert.strictEqual(result, null);
+    });
+  });
+
   describe('getActionConfig', () => {
     test('merges source, repo, and defaults', async () => {
       const { getActionConfig } = await import('../../service/actions.js');
@@ -902,6 +992,253 @@ describe('actions.js', () => {
       assert.strictEqual(result.sessionId, mockSessionId, 'Should return session ID');
       assert.ok(result.warning, 'Should include warning about message failure');
       assert.ok(result.warning.includes('Failed to send message'), 'Warning should mention message failure');
+    });
+
+    test('uses /command endpoint for slash commands', async () => {
+      const { createSessionViaApi } = await import('../../service/actions.js');
+      
+      const mockSessionId = 'ses_cmd123';
+      let commandCalled = false;
+      let commandUrl = null;
+      let commandBody = null;
+      let messageCalled = false;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        if (urlObj.pathname === '/session' && opts?.method === 'POST') {
+          return {
+            ok: true,
+            json: async () => ({ id: mockSessionId }),
+          };
+        }
+        
+        if (urlObj.pathname.includes('/command') && opts?.method === 'POST') {
+          commandCalled = true;
+          commandUrl = url;
+          commandBody = JSON.parse(opts.body);
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
+          messageCalled = true;
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        // PATCH for title update
+        if (opts?.method === 'PATCH') {
+          return { ok: true, json: async () => ({}) };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await createSessionViaApi(
+        'http://localhost:4096',
+        '/path/to/project',
+        '/review https://github.com/org/repo/pull/123',
+        { fetch: mockFetch }
+      );
+      
+      assert.ok(result.success, 'Should succeed');
+      assert.ok(commandCalled, 'Should call /command endpoint');
+      assert.ok(!messageCalled, 'Should NOT call /message endpoint');
+      assert.ok(commandUrl.includes('/command'), 'URL should be /command endpoint');
+      assert.strictEqual(commandBody.command, 'review', 'Should pass command name');
+      assert.strictEqual(commandBody.arguments, 'https://github.com/org/repo/pull/123', 'Should pass arguments');
+    });
+
+    test('uses /message endpoint for regular prompts (not slash commands)', async () => {
+      const { createSessionViaApi } = await import('../../service/actions.js');
+      
+      const mockSessionId = 'ses_msg123';
+      let commandCalled = false;
+      let messageCalled = false;
+      let messageBody = null;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        if (urlObj.pathname === '/session' && opts?.method === 'POST') {
+          return {
+            ok: true,
+            json: async () => ({ id: mockSessionId }),
+          };
+        }
+        
+        if (urlObj.pathname.includes('/command') && opts?.method === 'POST') {
+          commandCalled = true;
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
+          messageCalled = true;
+          messageBody = JSON.parse(opts.body);
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await createSessionViaApi(
+        'http://localhost:4096',
+        '/path/to/project',
+        'Fix the bug in the login page',
+        { fetch: mockFetch }
+      );
+      
+      assert.ok(result.success, 'Should succeed');
+      assert.ok(!commandCalled, 'Should NOT call /command endpoint');
+      assert.ok(messageCalled, 'Should call /message endpoint');
+      assert.strictEqual(messageBody.parts[0].text, 'Fix the bug in the login page', 'Should pass prompt as message text');
+    });
+  });
+
+  describe('sendMessageToSession slash command routing', () => {
+    test('uses /command endpoint for slash commands', async () => {
+      const { sendMessageToSession } = await import('../../service/actions.js');
+      
+      let commandCalled = false;
+      let commandBody = null;
+      let messageCalled = false;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        if (urlObj.pathname.includes('/command') && opts?.method === 'POST') {
+          commandCalled = true;
+          commandBody = JSON.parse(opts.body);
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
+          messageCalled = true;
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        // PATCH for title update
+        if (opts?.method === 'PATCH') {
+          return { ok: true, json: async () => ({}) };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await sendMessageToSession(
+        'http://localhost:4096',
+        'ses_existing',
+        '/path/to/project',
+        '/devcontainer https://github.com/org/repo/issues/456',
+        { fetch: mockFetch }
+      );
+      
+      assert.ok(result.success, 'Should succeed');
+      assert.ok(commandCalled, 'Should call /command endpoint');
+      assert.ok(!messageCalled, 'Should NOT call /message endpoint');
+      assert.strictEqual(commandBody.command, 'devcontainer', 'Should pass command name');
+      assert.strictEqual(commandBody.arguments, 'https://github.com/org/repo/issues/456', 'Should pass arguments');
+    });
+
+    test('uses /message endpoint for regular prompts', async () => {
+      const { sendMessageToSession } = await import('../../service/actions.js');
+      
+      let commandCalled = false;
+      let messageCalled = false;
+      let messageBody = null;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        if (urlObj.pathname.includes('/command') && opts?.method === 'POST') {
+          commandCalled = true;
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
+          messageCalled = true;
+          messageBody = JSON.parse(opts.body);
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await sendMessageToSession(
+        'http://localhost:4096',
+        'ses_existing',
+        '/path/to/project',
+        'Please fix the bug',
+        { fetch: mockFetch }
+      );
+      
+      assert.ok(result.success, 'Should succeed');
+      assert.ok(!commandCalled, 'Should NOT call /command endpoint');
+      assert.ok(messageCalled, 'Should call /message endpoint');
+      assert.strictEqual(messageBody.parts[0].text, 'Please fix the bug', 'Should pass prompt as message text');
+    });
+
+    test('passes agent and model to /command endpoint', async () => {
+      const { sendMessageToSession } = await import('../../service/actions.js');
+      
+      let commandBody = null;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        if (urlObj.pathname.includes('/command') && opts?.method === 'POST') {
+          commandBody = JSON.parse(opts.body);
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        // PATCH for title update
+        if (opts?.method === 'PATCH') {
+          return { ok: true, json: async () => ({}) };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      await sendMessageToSession(
+        'http://localhost:4096',
+        'ses_existing',
+        '/path/to/project',
+        '/review https://github.com/org/repo/pull/123',
+        { 
+          fetch: mockFetch,
+          agent: 'code',
+          model: 'anthropic/claude-sonnet-4-20250514',
+        }
+      );
+      
+      assert.strictEqual(commandBody.agent, 'code', 'Should pass agent');
+      assert.strictEqual(commandBody.model, 'anthropic/claude-sonnet-4-20250514', 'Should pass model as string');
     });
   });
 

@@ -15,6 +15,84 @@ import path from "path";
 import os from "os";
 
 /**
+ * Parse a slash command from the beginning of a prompt
+ * Returns null if the prompt doesn't start with a slash command
+ * 
+ * @param {string} prompt - The prompt text
+ * @returns {object|null} { command, arguments, rest } or null
+ */
+export function parseSlashCommand(prompt) {
+  if (!prompt || typeof prompt !== 'string') {
+    return null;
+  }
+  
+  // Match /command at the start, followed by optional arguments on the same line
+  // Command names can contain letters, numbers, hyphens, and underscores
+  const match = prompt.match(/^\/([a-zA-Z0-9_-]+)(?:\s+(.*))?$/m);
+  
+  if (!match) {
+    return null;
+  }
+  
+  const command = match[1];
+  const firstLineArgs = match[2]?.trim() || '';
+  
+  // Find where the first line ends to get the "rest" of the prompt
+  const firstNewline = prompt.indexOf('\n');
+  const rest = firstNewline >= 0 ? prompt.slice(firstNewline + 1).trim() : '';
+  
+  return {
+    command,
+    arguments: firstLineArgs,
+    rest,
+  };
+}
+
+/**
+ * Send a command to a session via the /command endpoint
+ * 
+ * @param {string} serverUrl - Server URL
+ * @param {string} sessionId - Session ID
+ * @param {string} directory - Working directory
+ * @param {object} parsedCommand - Parsed command from parseSlashCommand
+ * @param {object} [options] - Options
+ * @param {string} [options.agent] - Agent to use
+ * @param {string} [options.model] - Model to use
+ * @param {function} [options.fetch] - Custom fetch function (for testing)
+ * @returns {Promise<Response>} The fetch response
+ */
+async function sendCommand(serverUrl, sessionId, directory, parsedCommand, options = {}) {
+  const fetchFn = options.fetch || fetch;
+  
+  const commandUrl = new URL(`/session/${sessionId}/command`, serverUrl);
+  commandUrl.searchParams.set('directory', directory);
+  
+  // Build command body per OpenCode API schema
+  const commandBody = {
+    command: parsedCommand.command,
+    arguments: parsedCommand.arguments,
+  };
+  
+  // Add agent if specified
+  if (options.agent) {
+    commandBody.agent = options.agent;
+  }
+  
+  // Add model if specified (the /command endpoint takes model as a single string)
+  if (options.model) {
+    commandBody.model = options.model;
+  }
+  
+  debug(`sendCommand: POST ${commandUrl} command=${parsedCommand.command} args=${parsedCommand.arguments}`);
+  
+  return fetchFn(commandUrl.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(commandBody),
+  });
+}
+
+/**
  * Get running opencode server ports by parsing lsof output
  * @returns {Promise<number[]>} Array of port numbers
  */
@@ -455,50 +533,65 @@ export async function sendMessageToSession(serverUrl, sessionId, directory, prom
       debug(`sendMessageToSession: updated title for session ${sessionId}`);
     }
     
-    // Step 2: Send the message
-    const messageUrl = new URL(`/session/${sessionId}/message`, serverUrl);
-    messageUrl.searchParams.set('directory', directory);
-    
-    const messageBody = {
-      parts: [{ type: 'text', text: prompt }],
-    };
-    
-    if (options.agent) {
-      messageBody.agent = options.agent;
-    }
-    
-    if (options.model) {
-      const [providerID, modelID] = options.model.includes('/') 
-        ? options.model.split('/', 2) 
-        : ['anthropic', options.model];
-      messageBody.providerID = providerID;
-      messageBody.modelID = modelID;
-    }
+    // Step 2: Check if the prompt starts with a slash command
+    const parsedCommand = parseSlashCommand(prompt);
     
     // Use AbortController with timeout (same pattern as createSessionViaApi)
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
     
     try {
-      const messageResponse = await fetchFn(messageUrl.toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(messageBody),
-        signal: controller.signal,
-      });
+      let response;
+      
+      if (parsedCommand) {
+        // Use the /command endpoint for slash commands
+        debug(`sendMessageToSession: detected command /${parsedCommand.command}`);
+        response = await sendCommand(serverUrl, sessionId, directory, parsedCommand, {
+          agent: options.agent,
+          model: options.model,
+          fetch: (url, opts) => fetchFn(url, { ...opts, signal: controller.signal }),
+        });
+      } else {
+        // Use the /message endpoint for regular prompts
+        const messageUrl = new URL(`/session/${sessionId}/message`, serverUrl);
+        messageUrl.searchParams.set('directory', directory);
+        
+        const messageBody = {
+          parts: [{ type: 'text', text: prompt }],
+        };
+        
+        if (options.agent) {
+          messageBody.agent = options.agent;
+        }
+        
+        if (options.model) {
+          const [providerID, modelID] = options.model.includes('/') 
+            ? options.model.split('/', 2) 
+            : ['anthropic', options.model];
+          messageBody.providerID = providerID;
+          messageBody.modelID = modelID;
+        }
+        
+        response = await fetchFn(messageUrl.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(messageBody),
+          signal: controller.signal,
+        });
+      }
       
       clearTimeout(timeoutId);
       
-      if (!messageResponse.ok) {
-        const errorText = await messageResponse.text();
-        throw new Error(`Failed to send message: ${messageResponse.status} ${errorText}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to send ${parsedCommand ? 'command' : 'message'}: ${response.status} ${errorText}`);
       }
       
-      debug(`sendMessageToSession: sent message to session ${sessionId}`);
+      debug(`sendMessageToSession: sent ${parsedCommand ? 'command' : 'message'} to session ${sessionId}`);
     } catch (abortErr) {
       clearTimeout(timeoutId);
       if (abortErr.name === 'AbortError') {
-        debug(`sendMessageToSession: message request started for session ${sessionId} (response aborted as expected)`);
+        debug(`sendMessageToSession: request started for session ${sessionId} (response aborted as expected)`);
       } else {
         throw abortErr;
       }
@@ -610,58 +703,72 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
       });
     }
     
-    // Step 3: Send the initial message
-    const messageUrl = new URL(`/session/${session.id}/message`, serverUrl);
-    messageUrl.searchParams.set('directory', directory);
+    // Step 3: Check if the prompt starts with a slash command
+    const parsedCommand = parseSlashCommand(prompt);
     
-    // Build message body
-    const messageBody = {
-      parts: [{ type: 'text', text: prompt }],
-    };
-    
-    // Add agent if specified
-    if (options.agent) {
-      messageBody.agent = options.agent;
-    }
-    
-    // Add model if specified (format: provider/model)
-    if (options.model) {
-      const [providerID, modelID] = options.model.includes('/') 
-        ? options.model.split('/', 2) 
-        : ['anthropic', options.model];
-      messageBody.providerID = providerID;
-      messageBody.modelID = modelID;
-    }
-    
-    // Use AbortController with timeout for the message POST
-    // The /session/{id}/message endpoint returns a chunked/streaming response
-    // that stays open until the agent completes. We only need to verify the
-    // request was accepted (2xx status), not wait for the full response.
+    // Use AbortController with timeout for the request
+    // The endpoints return a chunked/streaming response that stays open until
+    // the agent completes. We only need to verify the request was accepted.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
     try {
-      const messageResponse = await fetchFn(messageUrl.toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(messageBody),
-        signal: controller.signal,
-      });
+      let response;
+      
+      if (parsedCommand) {
+        // Use the /command endpoint for slash commands
+        debug(`createSessionViaApi: detected command /${parsedCommand.command}`);
+        response = await sendCommand(serverUrl, session.id, directory, parsedCommand, {
+          agent: options.agent,
+          model: options.model,
+          fetch: (url, opts) => fetchFn(url, { ...opts, signal: controller.signal }),
+        });
+      } else {
+        // Use the /message endpoint for regular prompts
+        const messageUrl = new URL(`/session/${session.id}/message`, serverUrl);
+        messageUrl.searchParams.set('directory', directory);
+        
+        // Build message body
+        const messageBody = {
+          parts: [{ type: 'text', text: prompt }],
+        };
+        
+        // Add agent if specified
+        if (options.agent) {
+          messageBody.agent = options.agent;
+        }
+        
+        // Add model if specified (format: provider/model)
+        if (options.model) {
+          const [providerID, modelID] = options.model.includes('/') 
+            ? options.model.split('/', 2) 
+            : ['anthropic', options.model];
+          messageBody.providerID = providerID;
+          messageBody.modelID = modelID;
+        }
+        
+        response = await fetchFn(messageUrl.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(messageBody),
+          signal: controller.signal,
+        });
+      }
       
       clearTimeout(timeoutId);
       
-      if (!messageResponse.ok) {
-        const errorText = await messageResponse.text();
-        throw new Error(`Failed to send message: ${messageResponse.status} ${errorText}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to send ${parsedCommand ? 'command' : 'message'}: ${response.status} ${errorText}`);
       }
       
-      debug(`createSessionViaApi: sent message to session ${session.id}`);
+      debug(`createSessionViaApi: sent ${parsedCommand ? 'command' : 'message'} to session ${session.id}`);
     } catch (abortErr) {
       clearTimeout(timeoutId);
       // AbortError is expected - we intentionally abort after verifying the request started
-      // The server accepted our message, we just don't need to wait for the response
+      // The server accepted our request, we just don't need to wait for the response
       if (abortErr.name === 'AbortError') {
-        debug(`createSessionViaApi: message request started for session ${session.id} (response aborted as expected)`);
+        debug(`createSessionViaApi: request started for session ${session.id} (response aborted as expected)`);
       } else {
         throw abortErr;
       }
