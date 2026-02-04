@@ -307,6 +307,258 @@ export function buildCommand(item, config) {
 }
 
 /**
+ * List sessions from the OpenCode server
+ * 
+ * @param {string} serverUrl - Server URL (e.g., "http://localhost:4096")
+ * @param {object} [options] - Options
+ * @param {string} [options.directory] - Filter by directory
+ * @param {function} [options.fetch] - Custom fetch function (for testing)
+ * @returns {Promise<Array>} Array of session objects
+ */
+export async function listSessions(serverUrl, options = {}) {
+  const fetchFn = options.fetch || fetch;
+  
+  try {
+    const url = new URL('/session', serverUrl);
+    if (options.directory) {
+      url.searchParams.set('directory', options.directory);
+    }
+    // Only get root sessions (not child/forked sessions)
+    url.searchParams.set('roots', 'true');
+    
+    const response = await fetchFn(url.toString());
+    
+    if (!response.ok) {
+      debug(`listSessions: ${serverUrl} returned ${response.status}`);
+      return [];
+    }
+    
+    const sessions = await response.json();
+    return Array.isArray(sessions) ? sessions : [];
+  } catch (err) {
+    debug(`listSessions: error - ${err.message}`);
+    return [];
+  }
+}
+
+/**
+ * Check if a session is archived
+ * A session is archived if time.archived is set (it's a timestamp)
+ * 
+ * @param {object} session - Session object from API
+ * @returns {boolean} True if session is archived
+ */
+export function isSessionArchived(session) {
+  return session?.time?.archived !== undefined;
+}
+
+/**
+ * Get session statuses from the OpenCode server
+ * Returns a map of sessionId -> status (idle, busy, retry)
+ * Sessions not in the map are considered idle
+ * 
+ * @param {string} serverUrl - Server URL
+ * @param {object} [options] - Options
+ * @param {function} [options.fetch] - Custom fetch function (for testing)
+ * @returns {Promise<object>} Map of sessionId -> status object
+ */
+export async function getSessionStatuses(serverUrl, options = {}) {
+  const fetchFn = options.fetch || fetch;
+  
+  try {
+    const response = await fetchFn(`${serverUrl}/session/status`);
+    
+    if (!response.ok) {
+      debug(`getSessionStatuses: ${serverUrl} returned ${response.status}`);
+      return {};
+    }
+    
+    return await response.json();
+  } catch (err) {
+    debug(`getSessionStatuses: error - ${err.message}`);
+    return {};
+  }
+}
+
+/**
+ * Find the best session to reuse from a list of candidates
+ * Prefers idle sessions, then most recently updated
+ * 
+ * @param {Array} sessions - Array of non-archived sessions
+ * @param {object} statuses - Map of sessionId -> status from /session/status
+ * @returns {object|null} Best session to reuse, or null if none
+ */
+export function selectBestSession(sessions, statuses) {
+  if (!sessions || sessions.length === 0) {
+    return null;
+  }
+  
+  // Separate idle vs busy/retry sessions
+  const idle = [];
+  const other = [];
+  
+  for (const session of sessions) {
+    const status = statuses[session.id];
+    // Sessions not in statuses map are idle (per OpenCode behavior)
+    if (!status || status.type === 'idle') {
+      idle.push(session);
+    } else {
+      other.push(session);
+    }
+  }
+  
+  // Sort by most recently updated (highest time.updated first)
+  const sortByUpdated = (a, b) => (b.time?.updated || 0) - (a.time?.updated || 0);
+  
+  // Prefer idle sessions
+  if (idle.length > 0) {
+    idle.sort(sortByUpdated);
+    return idle[0];
+  }
+  
+  // Fall back to busy/retry sessions (sorted by most recent)
+  if (other.length > 0) {
+    other.sort(sortByUpdated);
+    return other[0];
+  }
+  
+  return null;
+}
+
+/**
+ * Send a message to an existing session
+ * 
+ * @param {string} serverUrl - Server URL
+ * @param {string} sessionId - Session ID to send message to
+ * @param {string} directory - Working directory
+ * @param {string} prompt - The prompt/message to send
+ * @param {object} [options] - Options
+ * @param {string} [options.title] - Update session title (optional)
+ * @param {string} [options.agent] - Agent to use
+ * @param {string} [options.model] - Model to use
+ * @param {function} [options.fetch] - Custom fetch function (for testing)
+ * @returns {Promise<object>} Result with sessionId, success, error
+ */
+export async function sendMessageToSession(serverUrl, sessionId, directory, prompt, options = {}) {
+  const fetchFn = options.fetch || fetch;
+  
+  try {
+    // Step 1: Update session title if provided
+    if (options.title) {
+      const updateUrl = new URL(`/session/${sessionId}`, serverUrl);
+      updateUrl.searchParams.set('directory', directory);
+      await fetchFn(updateUrl.toString(), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: options.title }),
+      });
+      debug(`sendMessageToSession: updated title for session ${sessionId}`);
+    }
+    
+    // Step 2: Send the message
+    const messageUrl = new URL(`/session/${sessionId}/message`, serverUrl);
+    messageUrl.searchParams.set('directory', directory);
+    
+    const messageBody = {
+      parts: [{ type: 'text', text: prompt }],
+    };
+    
+    if (options.agent) {
+      messageBody.agent = options.agent;
+    }
+    
+    if (options.model) {
+      const [providerID, modelID] = options.model.includes('/') 
+        ? options.model.split('/', 2) 
+        : ['anthropic', options.model];
+      messageBody.providerID = providerID;
+      messageBody.modelID = modelID;
+    }
+    
+    // Use AbortController with timeout (same pattern as createSessionViaApi)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    try {
+      const messageResponse = await fetchFn(messageUrl.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(messageBody),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!messageResponse.ok) {
+        const errorText = await messageResponse.text();
+        throw new Error(`Failed to send message: ${messageResponse.status} ${errorText}`);
+      }
+      
+      debug(`sendMessageToSession: sent message to session ${sessionId}`);
+    } catch (abortErr) {
+      clearTimeout(timeoutId);
+      if (abortErr.name === 'AbortError') {
+        debug(`sendMessageToSession: message request started for session ${sessionId} (response aborted as expected)`);
+      } else {
+        throw abortErr;
+      }
+    }
+    
+    return {
+      success: true,
+      sessionId,
+      directory,
+      reused: true,
+    };
+  } catch (err) {
+    debug(`sendMessageToSession: error - ${err.message}`);
+    return {
+      success: false,
+      error: err.message,
+    };
+  }
+}
+
+/**
+ * Find an existing session to reuse for the given directory
+ * Returns null if no suitable session found (archived sessions are excluded)
+ * 
+ * @param {string} serverUrl - Server URL
+ * @param {string} directory - Working directory to match
+ * @param {object} [options] - Options
+ * @param {function} [options.fetch] - Custom fetch function (for testing)
+ * @returns {Promise<object|null>} Session to reuse, or null
+ */
+export async function findReusableSession(serverUrl, directory, options = {}) {
+  // Get sessions for this directory
+  const sessions = await listSessions(serverUrl, { 
+    directory, 
+    fetch: options.fetch 
+  });
+  
+  if (sessions.length === 0) {
+    debug(`findReusableSession: no sessions found for ${directory}`);
+    return null;
+  }
+  
+  // Filter out archived sessions
+  const activeSessions = sessions.filter(s => !isSessionArchived(s));
+  
+  if (activeSessions.length === 0) {
+    debug(`findReusableSession: all ${sessions.length} sessions are archived for ${directory}`);
+    return null;
+  }
+  
+  debug(`findReusableSession: found ${activeSessions.length} active sessions for ${directory}`);
+  
+  // Get statuses to prefer idle sessions
+  const statuses = await getSessionStatuses(serverUrl, { fetch: options.fetch });
+  
+  // Select the best session
+  return selectBestSession(activeSessions, statuses);
+}
+
+/**
  * Create a session via the OpenCode HTTP API
  * 
  * This is a workaround for the known issue where `opencode run --attach` 
@@ -500,6 +752,8 @@ export async function executeAction(item, config, options = {}) {
     worktree: worktreeMode,
     // Expand worktree_name template with item fields (e.g., "issue-{number}")
     worktreeName: config.worktree_name ? expandTemplate(config.worktree_name, item) : undefined,
+    // Config flag to control sandbox reuse (default true)
+    preferExistingSandbox: config.prefer_existing_sandbox,
   };
   
   const worktreeResult = await resolveWorktreeDirectory(
@@ -513,6 +767,8 @@ export async function executeAction(item, config, options = {}) {
   
   if (worktreeResult.worktreeCreated) {
     debug(`executeAction: created new worktree at ${cwd}`);
+  } else if (worktreeResult.worktreeReused) {
+    debug(`executeAction: reusing existing sandbox at ${cwd}`);
   } else if (worktreeResult.error) {
     debug(`executeAction: worktree resolution warning - ${worktreeResult.error}`);
   }
@@ -526,6 +782,34 @@ export async function executeAction(item, config, options = {}) {
   const sessionTitle = config.session?.name
     ? buildSessionName(config.session.name, item)
     : (item.title || `session-${Date.now()}`);
+  
+  // Check if we should try to reuse an existing session
+  const reuseActiveSession = config.reuse_active_session !== false; // default true
+  
+  if (reuseActiveSession && !options.dryRun) {
+    const existingSession = await findReusableSession(serverUrl, cwd, { fetch: options.fetch });
+    
+    if (existingSession) {
+      debug(`executeAction: found reusable session ${existingSession.id} for ${cwd}`);
+      
+      const reuseCommand = `[API] POST ${serverUrl}/session/${existingSession.id}/message (reusing session)`;
+      
+      const result = await sendMessageToSession(serverUrl, existingSession.id, cwd, prompt, {
+        title: sessionTitle,
+        agent: config.agent,
+        model: config.model,
+        fetch: options.fetch,
+      });
+      
+      return {
+        command: reuseCommand,
+        success: result.success,
+        sessionId: result.sessionId,
+        sessionReused: true,
+        error: result.error,
+      };
+    }
+  }
   
   const apiCommand = `[API] POST ${serverUrl}/session?directory=${cwd}`;
   debug(`executeAction: using HTTP API - ${apiCommand}`);

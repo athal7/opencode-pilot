@@ -8,18 +8,26 @@
 import { debug } from "./logger.js";
 
 /**
- * List available worktrees/sandboxes for a project
+ * List existing worktrees from the OpenCode server
  * 
  * @param {string} serverUrl - OpenCode server URL (e.g., "http://localhost:4096")
  * @param {object} [options] - Options
+ * @param {string} [options.directory] - Project directory (required for global server)
  * @param {function} [options.fetch] - Custom fetch function (for testing)
- * @returns {Promise<string[]>} Array of worktree directory paths
+ * @returns {Promise<string[]>} Array of worktree paths
  */
 export async function listWorktrees(serverUrl, options = {}) {
   const fetchFn = options.fetch || fetch;
   
   try {
-    const response = await fetchFn(`${serverUrl}/experimental/worktree`);
+    // Build URL with directory parameter if provided
+    // This tells the global server which project to list worktrees for
+    let url = `${serverUrl}/experimental/worktree`;
+    if (options.directory) {
+      url += `?directory=${encodeURIComponent(options.directory)}`;
+    }
+    
+    const response = await fetchFn(url);
     
     if (!response.ok) {
       debug(`listWorktrees: ${serverUrl} returned ${response.status}`);
@@ -163,6 +171,25 @@ export async function getProjectInfoForDirectory(serverUrl, directory, options =
 }
 
 /**
+ * Find an existing worktree by exact name match
+ * 
+ * @param {string[]} worktrees - List of worktree paths
+ * @param {string} name - Name to match (final path component)
+ * @returns {string|null} Matching worktree path or null
+ */
+function findWorktreeByName(worktrees, name) {
+  for (const wt of worktrees) {
+    // Match exact final path component
+    const parts = wt.split('/');
+    const finalComponent = parts[parts.length - 1];
+    if (finalComponent === name) {
+      return wt;
+    }
+  }
+  return null;
+}
+
+/**
  * Resolve the working directory based on worktree configuration
  * 
  * Uses OpenCode's experimental worktree API:
@@ -174,9 +201,10 @@ export async function getProjectInfoForDirectory(serverUrl, directory, options =
  * @param {object} worktreeConfig - Worktree configuration
  * @param {string} [worktreeConfig.worktree] - Worktree mode: "new" or worktree name
  * @param {string} [worktreeConfig.worktreeName] - Name for new worktree (only with "new")
+ * @param {boolean} [worktreeConfig.preferExistingSandbox] - If true (default), reuse existing sandbox with matching name
  * @param {object} [options] - Options
  * @param {function} [options.fetch] - Custom fetch function (for testing)
- * @returns {Promise<object>} Result with { directory, worktreeCreated?, error? }
+ * @returns {Promise<object>} Result with { directory, worktreeCreated?, worktreeReused?, error? }
  */
 export async function resolveWorktreeDirectory(serverUrl, baseDir, worktreeConfig, options = {}) {
   // No worktree config - use base directory
@@ -193,9 +221,25 @@ export async function resolveWorktreeDirectory(serverUrl, baseDir, worktreeConfi
   }
   
   const worktreeValue = worktreeConfig.worktree;
+  const preferExisting = worktreeConfig.preferExistingSandbox !== false; // default true
   
-  // "new" - create a fresh worktree via OpenCode API
+  // "new" - create a fresh worktree via OpenCode API (or reuse if matching name exists)
   if (worktreeValue === "new") {
+    // If worktreeName is provided and preferExisting is true, try to reuse existing
+    if (worktreeConfig.worktreeName && preferExisting) {
+      const worktrees = await listWorktrees(serverUrl, { ...options, directory: baseDir });
+      const existingMatch = findWorktreeByName(worktrees, worktreeConfig.worktreeName);
+      
+      if (existingMatch) {
+        debug(`resolveWorktreeDirectory: reusing existing sandbox "${worktreeConfig.worktreeName}" at ${existingMatch}`);
+        return {
+          directory: existingMatch,
+          worktreeReused: true,
+        };
+      }
+    }
+    
+    // No existing match found (or not looking), create new
     const result = await createWorktree(serverUrl, {
       directory: baseDir,
       name: worktreeConfig.worktreeName,
@@ -217,7 +261,7 @@ export async function resolveWorktreeDirectory(serverUrl, baseDir, worktreeConfi
   }
   
   // Named worktree - look it up from available sandboxes via OpenCode API
-  const worktrees = await listWorktrees(serverUrl, options);
+  const worktrees = await listWorktrees(serverUrl, { ...options, directory: baseDir });
   const match = worktrees.find(w => w.includes(worktreeValue));
   if (match) {
     return { directory: match };

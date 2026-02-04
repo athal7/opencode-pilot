@@ -567,9 +567,9 @@ describe('actions.js', () => {
       // Mock server discovery
       const mockDiscoverServer = async () => 'http://localhost:4096';
       
-      // Mock worktree list lookup
+      // Mock worktree list lookup - now includes directory param
       const mockFetch = async (url) => {
-        if (url === 'http://localhost:4096/experimental/worktree') {
+        if (url.includes('/experimental/worktree')) {
           return {
             ok: true,
             json: async () => [
@@ -902,6 +902,299 @@ describe('actions.js', () => {
       assert.strictEqual(result.sessionId, mockSessionId, 'Should return session ID');
       assert.ok(result.warning, 'Should include warning about message failure');
       assert.ok(result.warning.includes('Failed to send message'), 'Warning should mention message failure');
+    });
+  });
+
+  describe('session reuse', () => {
+    test('isSessionArchived returns true when time.archived is set', async () => {
+      const { isSessionArchived } = await import('../../service/actions.js');
+      
+      // Archived session (time.archived is a timestamp)
+      const archivedSession = { id: 'ses_1', time: { created: 1000, updated: 2000, archived: 3000 } };
+      assert.strictEqual(isSessionArchived(archivedSession), true);
+      
+      // Active session (no time.archived)
+      const activeSession = { id: 'ses_2', time: { created: 1000, updated: 2000 } };
+      assert.strictEqual(isSessionArchived(activeSession), false);
+      
+      // Handle edge cases
+      assert.strictEqual(isSessionArchived(null), false);
+      assert.strictEqual(isSessionArchived({}), false);
+      assert.strictEqual(isSessionArchived({ time: {} }), false);
+    });
+
+    test('selectBestSession prefers idle sessions', async () => {
+      const { selectBestSession } = await import('../../service/actions.js');
+      
+      const sessions = [
+        { id: 'ses_busy', time: { updated: 3000 } },
+        { id: 'ses_idle', time: { updated: 2000 } },
+        { id: 'ses_retry', time: { updated: 1000 } },
+      ];
+      
+      const statuses = {
+        'ses_busy': { type: 'busy' },
+        'ses_retry': { type: 'retry', attempt: 1, message: 'error', next: 5000 },
+        // ses_idle not in statuses = idle
+      };
+      
+      const best = selectBestSession(sessions, statuses);
+      assert.strictEqual(best.id, 'ses_idle', 'Should prefer idle session even with older updated time');
+    });
+
+    test('selectBestSession falls back to most recently updated when all busy', async () => {
+      const { selectBestSession } = await import('../../service/actions.js');
+      
+      const sessions = [
+        { id: 'ses_1', time: { updated: 1000 } },
+        { id: 'ses_2', time: { updated: 3000 } },  // most recent
+        { id: 'ses_3', time: { updated: 2000 } },
+      ];
+      
+      const statuses = {
+        'ses_1': { type: 'busy' },
+        'ses_2': { type: 'busy' },
+        'ses_3': { type: 'busy' },
+      };
+      
+      const best = selectBestSession(sessions, statuses);
+      assert.strictEqual(best.id, 'ses_2', 'Should select most recently updated when all busy');
+    });
+
+    test('selectBestSession returns null for empty array', async () => {
+      const { selectBestSession } = await import('../../service/actions.js');
+      
+      assert.strictEqual(selectBestSession([], {}), null);
+      assert.strictEqual(selectBestSession(null, {}), null);
+    });
+
+    test('listSessions fetches sessions filtered by directory', async () => {
+      const { listSessions } = await import('../../service/actions.js');
+      
+      let calledUrl = null;
+      const mockFetch = async (url) => {
+        calledUrl = url;
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'ses_1', directory: '/path/to/project', time: { created: 1000 } },
+          ],
+        };
+      };
+      
+      const sessions = await listSessions('http://localhost:4096', { 
+        directory: '/path/to/project',
+        fetch: mockFetch 
+      });
+      
+      assert.ok(calledUrl.includes('directory='), 'Should include directory param');
+      assert.ok(calledUrl.includes('roots=true'), 'Should only get root sessions');
+      assert.strictEqual(sessions.length, 1);
+    });
+
+    test('findReusableSession filters out archived sessions', async () => {
+      const { findReusableSession } = await import('../../service/actions.js');
+      
+      const mockFetch = async (url) => {
+        if (url.includes('/session/status')) {
+          return { ok: true, json: async () => ({}) };
+        }
+        // GET /session
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'ses_archived', directory: '/path', time: { created: 1000, updated: 3000, archived: 4000 } },
+            { id: 'ses_active', directory: '/path', time: { created: 2000, updated: 2500 } },
+          ],
+        };
+      };
+      
+      const session = await findReusableSession('http://localhost:4096', '/path', { fetch: mockFetch });
+      
+      assert.ok(session, 'Should find a session');
+      assert.strictEqual(session.id, 'ses_active', 'Should return the active session, not archived');
+    });
+
+    test('findReusableSession returns null when all sessions are archived', async () => {
+      const { findReusableSession } = await import('../../service/actions.js');
+      
+      const mockFetch = async (url) => {
+        if (url.includes('/session/status')) {
+          return { ok: true, json: async () => ({}) };
+        }
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'ses_1', directory: '/path', time: { created: 1000, archived: 2000 } },
+            { id: 'ses_2', directory: '/path', time: { created: 1500, archived: 2500 } },
+          ],
+        };
+      };
+      
+      const session = await findReusableSession('http://localhost:4096', '/path', { fetch: mockFetch });
+      
+      assert.strictEqual(session, null, 'Should return null when all sessions are archived');
+    });
+
+    test('executeAction reuses existing session instead of creating new', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      
+      const item = { number: 123, title: 'Fix bug' };
+      const config = {
+        path: tempDir,
+        prompt: 'default',
+      };
+      
+      let sessionCreated = false;
+      let messagePosted = false;
+      let messageSessionId = null;
+      
+      const mockFetch = async (url, opts) => {
+        // GET /session - return existing active session
+        if (url.includes('/session') && !url.includes('/message') && !url.includes('/status') && (!opts || opts.method !== 'POST' && opts.method !== 'PATCH')) {
+          return {
+            ok: true,
+            json: async () => [
+              { id: 'ses_existing', directory: tempDir, time: { created: 1000, updated: 2000 } },
+            ],
+          };
+        }
+        // GET /session/status
+        if (url.includes('/session/status')) {
+          return { ok: true, json: async () => ({}) };  // session is idle
+        }
+        // POST /session (create) - should NOT be called
+        if (url.endsWith('/session') && opts?.method === 'POST') {
+          sessionCreated = true;
+          return { ok: true, json: async () => ({ id: 'ses_new' }) };
+        }
+        // PATCH /session/:id (update title)
+        if (opts?.method === 'PATCH') {
+          return { ok: true, json: async () => ({}) };
+        }
+        // POST /session/:id/message
+        if (url.includes('/message') && opts?.method === 'POST') {
+          messagePosted = true;
+          messageSessionId = url.match(/session\/([^/]+)\/message/)?.[1];
+          return { ok: true, json: async () => ({ success: true }) };
+        }
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      
+      const result = await executeAction(item, config, { 
+        discoverServer: mockDiscoverServer,
+        fetch: mockFetch
+      });
+      
+      assert.ok(result.success, 'Should succeed');
+      assert.strictEqual(result.sessionId, 'ses_existing', 'Should use existing session ID');
+      assert.strictEqual(result.sessionReused, true, 'Should indicate session was reused');
+      assert.strictEqual(sessionCreated, false, 'Should NOT create a new session');
+      assert.strictEqual(messagePosted, true, 'Should post message to existing session');
+      assert.strictEqual(messageSessionId, 'ses_existing', 'Should post to the existing session');
+    });
+
+    test('executeAction creates new session when existing is archived', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      
+      const item = { number: 456, title: 'New feature' };
+      const config = {
+        path: tempDir,
+        prompt: 'default',
+      };
+      
+      let sessionCreated = false;
+      
+      const mockFetch = async (url, opts) => {
+        // GET /session - return only archived session
+        if (url.includes('/session') && !url.includes('/message') && !url.includes('/status') && (!opts || opts.method !== 'POST' && opts.method !== 'PATCH')) {
+          return {
+            ok: true,
+            json: async () => [
+              { id: 'ses_archived', directory: tempDir, time: { created: 1000, updated: 2000, archived: 3000 } },
+            ],
+          };
+        }
+        // GET /session/status
+        if (url.includes('/session/status')) {
+          return { ok: true, json: async () => ({}) };
+        }
+        // POST /session (create) - should be called since archived session can't be reused
+        if (url.includes('/session') && !url.includes('/message') && opts?.method === 'POST') {
+          sessionCreated = true;
+          return { ok: true, json: async () => ({ id: 'ses_new' }) };
+        }
+        // PATCH /session/:id
+        if (opts?.method === 'PATCH') {
+          return { ok: true, json: async () => ({}) };
+        }
+        // POST /session/:id/message
+        if (url.includes('/message') && opts?.method === 'POST') {
+          return { ok: true, json: async () => ({ success: true }) };
+        }
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      
+      const result = await executeAction(item, config, { 
+        discoverServer: mockDiscoverServer,
+        fetch: mockFetch
+      });
+      
+      assert.ok(result.success, 'Should succeed');
+      assert.strictEqual(result.sessionId, 'ses_new', 'Should create new session');
+      assert.strictEqual(result.sessionReused, undefined, 'Should NOT indicate session was reused');
+      assert.strictEqual(sessionCreated, true, 'Should create a new session when existing is archived');
+    });
+
+    test('executeAction skips session reuse when reuse_active_session is false', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      
+      const item = { number: 789, title: 'Forced new' };
+      const config = {
+        path: tempDir,
+        prompt: 'default',
+        reuse_active_session: false,  // disable reuse
+      };
+      
+      let sessionListCalled = false;
+      let sessionCreated = false;
+      
+      const mockFetch = async (url, opts) => {
+        // GET /session - should NOT be called
+        if (url.includes('/session') && !url.includes('/message') && !url.includes('/status') && (!opts || opts.method !== 'POST' && opts.method !== 'PATCH')) {
+          sessionListCalled = true;
+          return { ok: true, json: async () => [] };
+        }
+        // POST /session
+        if (url.includes('/session') && !url.includes('/message') && opts?.method === 'POST') {
+          sessionCreated = true;
+          return { ok: true, json: async () => ({ id: 'ses_forced_new' }) };
+        }
+        // PATCH
+        if (opts?.method === 'PATCH') {
+          return { ok: true, json: async () => ({}) };
+        }
+        // POST message
+        if (url.includes('/message') && opts?.method === 'POST') {
+          return { ok: true, json: async () => ({ success: true }) };
+        }
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      
+      const result = await executeAction(item, config, { 
+        discoverServer: mockDiscoverServer,
+        fetch: mockFetch
+      });
+      
+      assert.ok(result.success, 'Should succeed');
+      assert.strictEqual(sessionListCalled, false, 'Should NOT list sessions when reuse disabled');
+      assert.strictEqual(sessionCreated, true, 'Should create new session directly');
     });
   });
 });

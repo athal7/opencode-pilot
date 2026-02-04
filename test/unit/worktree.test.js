@@ -22,6 +22,22 @@ describe("worktree", () => {
       assert.strictEqual(mockFetch.mock.calls[0].arguments[0], "http://localhost:4096/experimental/worktree");
     });
 
+    it("passes directory parameter when provided", async () => {
+      const mockFetch = mock.fn(async () => ({
+        ok: true,
+        json: async () => ["/path/to/worktree"],
+      }));
+
+      await listWorktrees("http://localhost:4096", { 
+        fetch: mockFetch,
+        directory: "/path/to/project"
+      });
+
+      const calledUrl = mockFetch.mock.calls[0].arguments[0];
+      assert.ok(calledUrl.includes("directory="), "Should include directory param");
+      assert.ok(calledUrl.includes(encodeURIComponent("/path/to/project")), "Should encode directory path");
+    });
+
     it("returns empty array on error", async () => {
       const mockFetch = mock.fn(async () => ({
         ok: false,
@@ -189,14 +205,24 @@ describe("worktree", () => {
     });
 
     it("passes worktreeName when creating new worktree", async () => {
-      const mockFetch = mock.fn(async () => ({
-        ok: true,
-        json: async () => ({
-          name: "my-feature",
-          branch: "opencode/my-feature",
-          directory: "/data/worktree/abc123/my-feature",
-        }),
-      }));
+      const mockFetch = mock.fn(async (url, opts) => {
+        // First call: GET /experimental/worktree (list) - return empty to trigger creation
+        if (!opts || opts.method !== 'POST') {
+          return {
+            ok: true,
+            json: async () => [],
+          };
+        }
+        // Second call: POST /experimental/worktree (create)
+        return {
+          ok: true,
+          json: async () => ({
+            name: "my-feature",
+            branch: "opencode/my-feature",
+            directory: "/data/worktree/abc123/my-feature",
+          }),
+        };
+      });
 
       await resolveWorktreeDirectory(
         "http://localhost:4096",
@@ -205,7 +231,11 @@ describe("worktree", () => {
         { fetch: mockFetch }
       );
 
-      const body = JSON.parse(mockFetch.mock.calls[0].arguments[1].body);
+      // Should have called both list (GET) and create (POST)
+      assert.strictEqual(mockFetch.mock.calls.length, 2);
+      // Second call should be POST with the worktree name
+      const postCall = mockFetch.mock.calls[1];
+      const body = JSON.parse(postCall.arguments[1].body);
       assert.strictEqual(body.name, "my-feature");
     });
 
@@ -248,6 +278,117 @@ describe("worktree", () => {
       );
 
       assert.strictEqual(result.directory, "/data/worktree/abc123/my-feature");
+    });
+
+    it("reuses existing sandbox when worktree='new' and worktreeName matches", async () => {
+      let postCalled = false;
+      let listUrl = null;
+      const mockFetch = mock.fn(async (url, opts) => {
+        // GET /experimental/worktree (list) - returns existing sandbox with matching name
+        if (!opts || opts.method !== 'POST') {
+          listUrl = url;
+          return {
+            ok: true,
+            json: async () => [
+              "/data/worktree/abc123/other-branch",
+              "/data/worktree/abc123/my-feature",  // matches worktreeName
+            ],
+          };
+        }
+        // POST /experimental/worktree (create) - should NOT be called
+        postCalled = true;
+        return { ok: true, json: async () => ({}) };
+      });
+
+      const result = await resolveWorktreeDirectory(
+        "http://localhost:4096",
+        "/path/to/project",
+        { worktree: "new", worktreeName: "my-feature" },
+        { fetch: mockFetch }
+      );
+
+      // Should reuse existing sandbox
+      assert.strictEqual(result.directory, "/data/worktree/abc123/my-feature");
+      assert.strictEqual(result.worktreeReused, true);
+      assert.strictEqual(result.worktreeCreated, undefined);
+      // POST should NOT have been called
+      assert.strictEqual(postCalled, false, "Should not call POST when reusing existing sandbox");
+      // listWorktrees should be called with directory parameter
+      assert.ok(listUrl.includes("directory="), "Should pass directory to listWorktrees");
+      assert.ok(listUrl.includes(encodeURIComponent("/path/to/project")), "Should pass correct project directory");
+    });
+
+    it("creates new sandbox when worktree='new' and no matching name exists", async () => {
+      let getCalled = false;
+      let postCalled = false;
+      const mockFetch = mock.fn(async (url, opts) => {
+        // GET /experimental/worktree (list) - no matching name
+        if (!opts || opts.method !== 'POST') {
+          getCalled = true;
+          return {
+            ok: true,
+            json: async () => ["/data/worktree/abc123/other-branch"],
+          };
+        }
+        // POST /experimental/worktree (create)
+        postCalled = true;
+        return {
+          ok: true,
+          json: async () => ({
+            name: "new-feature",
+            branch: "opencode/new-feature",
+            directory: "/data/worktree/abc123/new-feature",
+          }),
+        };
+      });
+
+      const result = await resolveWorktreeDirectory(
+        "http://localhost:4096",
+        "/path/to/project",
+        { worktree: "new", worktreeName: "new-feature" },
+        { fetch: mockFetch }
+      );
+
+      // Should create new sandbox
+      assert.strictEqual(result.directory, "/data/worktree/abc123/new-feature");
+      assert.strictEqual(result.worktreeCreated, true);
+      assert.strictEqual(result.worktreeReused, undefined);
+      // Both GET and POST should have been called
+      assert.strictEqual(getCalled, true, "Should call GET to list existing worktrees");
+      assert.strictEqual(postCalled, true, "Should call POST to create new worktree");
+    });
+
+    it("skips sandbox reuse when preferExistingSandbox is false", async () => {
+      let getCalled = false;
+      const mockFetch = mock.fn(async (url, opts) => {
+        // GET /experimental/worktree - should NOT be called
+        if (!opts || opts.method !== 'POST') {
+          getCalled = true;
+          return { ok: true, json: async () => ["/data/worktree/abc123/my-feature"] };
+        }
+        // POST /experimental/worktree (create)
+        return {
+          ok: true,
+          json: async () => ({
+            name: "my-feature",
+            branch: "opencode/my-feature",
+            directory: "/data/worktree/abc123/my-feature-new",
+          }),
+        };
+      });
+
+      const result = await resolveWorktreeDirectory(
+        "http://localhost:4096",
+        "/path/to/project",
+        { worktree: "new", worktreeName: "my-feature", preferExistingSandbox: false },
+        { fetch: mockFetch }
+      );
+
+      // Should create new sandbox, not reuse
+      assert.strictEqual(result.directory, "/data/worktree/abc123/my-feature-new");
+      assert.strictEqual(result.worktreeCreated, true);
+      // GET should NOT have been called (skipped reuse check)
+      assert.strictEqual(getCalled, false, "Should skip GET when preferExistingSandbox is false");
     });
 
     it("returns error when named worktree not found", async () => {

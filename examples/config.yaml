@@ -1,5 +1,5 @@
 # Example config.yaml for opencode-pilot
-# Copy to ~/.config/opencode-pilot/config.yaml
+# Copy to ~/.config/opencode/pilot/config.yaml
 
 # Preferred OpenCode server port for attaching sessions
 # When multiple OpenCode instances are running, pilot will attach new sessions
@@ -19,6 +19,12 @@ repos_dir: ~/code
 defaults:
   agent: plan
   prompt: default
+  # Session reuse: append to existing non-archived session instead of creating new
+  # Default: true. Set to false to always create new sessions.
+  # reuse_active_session: true
+  # Sandbox reuse: reuse existing worktree/sandbox with matching name
+  # Default: true. Set to false to always create new sandboxes.
+  # prefer_existing_sandbox: true
 
 sources:
   # Presets - common patterns with sensible defaults

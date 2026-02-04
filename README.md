@@ -74,6 +74,23 @@ Session names for `my-prs-attention` indicate the condition: "Conflicts: {title}
 
 Create prompt templates as markdown files in `~/.config/opencode/pilot/templates/`. Templates support placeholders like `{title}`, `{body}`, `{number}`, `{html_url}`, etc.
 
+### Session and Sandbox Reuse
+
+By default, pilot reuses existing sessions and sandboxes to avoid duplicates:
+
+- **Session reuse**: If a non-archived session already exists for the target directory, pilot appends to it instead of creating a new session. Archived sessions are never reused.
+- **Sandbox reuse**: When `worktree: "new"` with a `worktree_name`, pilot first checks if a sandbox with that name already exists and reuses it.
+
+```yaml
+defaults:
+  # Disable session reuse (always create new sessions)
+  reuse_active_session: false
+  # Disable sandbox reuse (always create new worktrees)
+  prefer_existing_sandbox: false
+```
+
+When multiple sessions exist for the same directory, pilot prefers idle sessions over busy ones, then selects the most recently updated.
+
 ### Worktree Support
 
 Run sessions in isolated git worktrees instead of the main project directory. This uses OpenCode's built-in worktree management API to create and manage worktrees.
@@ -81,7 +98,7 @@ Run sessions in isolated git worktrees instead of the main project directory. Th
 ```yaml
 sources:
   - preset: github/my-issues
-    # Create a fresh worktree for each session
+    # Create a fresh worktree for each session (or reuse if name matches)
     worktree: "new"
     worktree_name: "issue-{number}"  # Optional: name template
     
@@ -91,9 +108,10 @@ sources:
 ```
 
 **Options:**
-- `worktree: "new"` - Create a new worktree via OpenCode's API
+- `worktree: "new"` - Create a new worktree via OpenCode's API (or reuse existing if name matches)
 - `worktree: "name"` - Look up existing worktree by name from project sandboxes
 - `worktree_name` - Template for naming new worktrees (only with `worktree: "new"`)
+- `prefer_existing_sandbox: false` - Disable sandbox reuse for this source
 
 ## CLI Commands
 
