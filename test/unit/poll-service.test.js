@@ -154,6 +154,56 @@ sources:
       assert.strictEqual(config.agent, 'code');
     });
 
+    test('includes worktree_name from source config', async () => {
+      const { buildActionConfigFromSource } = await import('../../service/poll-service.js');
+      
+      const source = {
+        name: 'test-source',
+        worktree_name: 'pr-{number}'
+      };
+      const repoConfig = {
+        path: '~/code/default'
+      };
+      
+      const config = buildActionConfigFromSource(source, repoConfig);
+      
+      assert.strictEqual(config.worktree_name, 'pr-{number}');
+    });
+
+    test('worktree_name from source overrides repoConfig', async () => {
+      const { buildActionConfigFromSource } = await import('../../service/poll-service.js');
+      
+      const source = {
+        name: 'test-source',
+        worktree_name: 'pr-{number}'
+      };
+      const repoConfig = {
+        path: '~/code/default',
+        worktree_name: 'issue-{number}'  // Should be overridden
+      };
+      
+      const config = buildActionConfigFromSource(source, repoConfig);
+      
+      assert.strictEqual(config.worktree_name, 'pr-{number}');
+    });
+
+    test('falls back to repoConfig worktree_name when source has none', async () => {
+      const { buildActionConfigFromSource } = await import('../../service/poll-service.js');
+      
+      const source = {
+        name: 'test-source'
+        // No worktree_name
+      };
+      const repoConfig = {
+        path: '~/code/default',
+        worktree_name: 'issue-{number}'
+      };
+      
+      const config = buildActionConfigFromSource(source, repoConfig);
+      
+      assert.strictEqual(config.worktree_name, 'issue-{number}');
+    });
+
   });
 
   describe('per-item repo resolution', () => {

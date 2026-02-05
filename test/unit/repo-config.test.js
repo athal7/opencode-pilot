@@ -874,6 +874,45 @@ sources:
       assert.strictEqual(sources[0].session.name, '{title}', 'linear preset should use title');
     });
 
+    test('github presets include worktree_name for sandbox reuse', async () => {
+      writeFileSync(configPath, `
+sources:
+  - preset: github/my-issues
+  - preset: github/review-requests
+  - preset: github/my-prs-attention
+`);
+
+      const { loadRepoConfig, getSources } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      const sources = getSources();
+
+      // my-issues: worktree_name: "issue-{number}"
+      assert.strictEqual(sources[0].worktree_name, 'issue-{number}', 'my-issues should use issue-{number}');
+      
+      // review-requests: worktree_name: "pr-{number}"
+      assert.strictEqual(sources[1].worktree_name, 'pr-{number}', 'review-requests should use pr-{number}');
+      
+      // my-prs-attention: worktree_name: "pr-{number}"
+      assert.strictEqual(sources[2].worktree_name, 'pr-{number}', 'my-prs-attention should use pr-{number}');
+    });
+
+    test('linear preset includes worktree_name for sandbox reuse', async () => {
+      writeFileSync(configPath, `
+sources:
+  - preset: linear/my-issues
+    args:
+      teamId: "team-uuid"
+      assigneeId: "user-uuid"
+`);
+
+      const { loadRepoConfig, getSources } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      const sources = getSources();
+
+      // linear uses the issue identifier (e.g., "ABC-123")
+      assert.strictEqual(sources[0].worktree_name, '{number}', 'linear preset should use {number} (identifier)');
+    });
+
   });
 
   describe('shorthand syntax', () => {

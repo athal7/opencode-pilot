@@ -50,6 +50,7 @@ export function buildActionConfigFromSource(source, repoConfig) {
     ...(source.agent && { agent: source.agent }),
     ...(source.model && { model: source.model }),
     ...(source.working_dir && { working_dir: source.working_dir }),
+    ...(source.worktree_name && { worktree_name: source.worktree_name }),
   };
 }
 

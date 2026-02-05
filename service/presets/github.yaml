@@ -24,6 +24,7 @@ my-issues:
   item:
     id: "{url}"
   repo: "{repository.nameWithOwner}"
+  worktree_name: "issue-{number}"
   session:
     name: "{title}"
 
@@ -35,6 +36,7 @@ review-requests:
     id: "{url}"
   repo: "{repository.nameWithOwner}"
   prompt: review
+  worktree_name: "pr-{number}"
   session:
     name: "Review: {title}"
 
@@ -47,6 +49,7 @@ my-prs-attention:
     id: "{url}"
   repo: "{repository.nameWithOwner}"
   prompt: review-feedback
+  worktree_name: "pr-{number}"
   session:
     # Dynamic name showing which conditions triggered (set by enrichment)
     name: "{_attention_label}: {title}"
@@ -56,7 +59,7 @@ my-prs-attention:
   readiness:
     # Require at least one attention condition (conflicts or human feedback)
     require_attention: true
-  # Reprocess when PR is updated
+  # Only reprocess when state changes (e.g., reopened)
+  # Note: updatedAt is NOT included - CI status changes would trigger reprocessing
   reprocess_on:
     - state
-    - updatedAt

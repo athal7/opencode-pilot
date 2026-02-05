@@ -21,5 +21,6 @@ my-issues:
     # teamId and assigneeId are required - user must provide
   item:
     id: "linear:{id}"
+  worktree_name: "{number}"
   session:
     name: "{title}"
