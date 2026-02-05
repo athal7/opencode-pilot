@@ -19,19 +19,11 @@ module.exports = {
     // Generate release notes
     '@semantic-release/release-notes-generator',
     
-    // Update version in package.json and publish to npm with provenance
+    // Update version in package.json (in memory) and publish to npm with provenance
+    // Note: version is NOT committed back to repo - only the published package has it
     ['@semantic-release/npm', { provenance: true }],
     
-    // Commit the version changes
-    [
-      '@semantic-release/git',
-      {
-        assets: ['package.json', 'package-lock.json'],
-        message: 'chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}'
-      }
-    ],
-    
-    // Create GitHub release
+    // Create GitHub release (this is the source of truth for versions)
     '@semantic-release/github'
   ]
 };
