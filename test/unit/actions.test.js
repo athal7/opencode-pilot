@@ -830,6 +830,64 @@ Check for bugs and security issues.`;
       assert.ok(result.command.includes(tempDir), 
         'Should use base directory when no worktree workflow detected');
     });
+
+    test('creates worktree when worktree_name configured but no existing sandboxes (dry run)', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      
+      const item = { number: 123, title: 'Review PR' };
+      const config = {
+        path: tempDir,
+        prompt: 'review',
+        // worktree_name without worktree: 'new' - preset pattern
+        worktree_name: 'pr-{number}'
+      };
+      
+      // Mock server discovery
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      
+      let worktreeListCalled = false;
+      let worktreeCreateCalled = false;
+      let createdWorktreeName = null;
+      
+      const mockFetch = async (url, opts) => {
+        // Worktree list endpoint - no existing worktrees
+        if (url.startsWith('http://localhost:4096/experimental/worktree') && !opts?.method) {
+          worktreeListCalled = true;
+          return {
+            ok: true,
+            json: async () => []
+          };
+        }
+        // Worktree creation endpoint
+        if (url.startsWith('http://localhost:4096/experimental/worktree') && opts?.method === 'POST') {
+          worktreeCreateCalled = true;
+          const body = JSON.parse(opts.body);
+          createdWorktreeName = body.name;
+          return {
+            ok: true,
+            json: async () => ({
+              name: body.name,
+              branch: `opencode/${body.name}`,
+              directory: `/data/worktree/proj/${body.name}`
+            })
+          };
+        }
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await executeAction(item, config, { 
+        dryRun: true,
+        discoverServer: mockDiscoverServer,
+        fetch: mockFetch
+      });
+      
+      assert.ok(result.dryRun);
+      assert.ok(worktreeListCalled, 'Should check for existing worktrees');
+      assert.ok(worktreeCreateCalled, 'Should create worktree when worktree_name is configured');
+      assert.strictEqual(createdWorktreeName, 'pr-123', 'Should expand worktree_name template');
+      assert.ok(result.command.includes('/data/worktree/proj/pr-123'), 
+        'Should use new worktree directory');
+    });
   });
 
   describe('createSessionViaApi', () => {
@@ -1532,6 +1590,278 @@ Check for bugs and security issues.`;
       assert.ok(result.success, 'Should succeed');
       assert.strictEqual(sessionListCalled, false, 'Should NOT list sessions when reuse disabled');
       assert.strictEqual(sessionCreated, true, 'Should create new session directly');
+    });
+  });
+
+  describe('buildSessionName', () => {
+    test('expands template with item fields', async () => {
+      const { buildSessionName } = await import('../../service/actions.js');
+      
+      const template = 'Review: {title}';
+      const item = { title: 'Fix mobile overflow', number: 123 };
+      
+      const result = buildSessionName(template, item);
+      
+      assert.strictEqual(result, 'Review: Fix mobile overflow');
+    });
+
+    test('handles nested field references', async () => {
+      const { buildSessionName } = await import('../../service/actions.js');
+      
+      const template = '{repository.name} #{number}';
+      const item = { repository: { name: 'my-repo' }, number: 456 };
+      
+      const result = buildSessionName(template, item);
+      
+      assert.strictEqual(result, 'my-repo #456');
+    });
+
+    test('preserves placeholders for missing fields', async () => {
+      const { buildSessionName } = await import('../../service/actions.js');
+      
+      const template = '{label}: {title}';
+      const item = { title: 'Fix bug' }; // no label field
+      
+      const result = buildSessionName(template, item);
+      
+      assert.strictEqual(result, '{label}: Fix bug');
+    });
+
+    test('handles attention label pattern', async () => {
+      const { buildSessionName } = await import('../../service/actions.js');
+      
+      const template = '{_attention_label}: {title}';
+      const item = { _attention_label: 'Conflicts + Feedback', title: 'Update API' };
+      
+      const result = buildSessionName(template, item);
+      
+      assert.strictEqual(result, 'Conflicts + Feedback: Update API');
+    });
+  });
+
+  describe('listSessions', () => {
+    test('fetches sessions from server with directory filter', async () => {
+      const { listSessions } = await import('../../service/actions.js');
+      
+      let capturedUrl = '';
+      const mockFetch = async (url) => {
+        capturedUrl = url;
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'ses_1', title: 'Session 1' },
+            { id: 'ses_2', title: 'Session 2' },
+          ],
+        };
+      };
+      
+      const result = await listSessions('http://localhost:4096', {
+        directory: '/Users/test/code/project',
+        fetch: mockFetch,
+      });
+      
+      assert.ok(capturedUrl.includes('directory='));
+      assert.ok(capturedUrl.includes(encodeURIComponent('/Users/test/code/project')));
+      assert.ok(capturedUrl.includes('roots=true'));
+      assert.strictEqual(result.length, 2);
+    });
+
+    test('returns empty array on server error', async () => {
+      const { listSessions } = await import('../../service/actions.js');
+      
+      const mockFetch = async () => ({
+        ok: false,
+        status: 500,
+      });
+      
+      const result = await listSessions('http://localhost:4096', { fetch: mockFetch });
+      
+      assert.deepStrictEqual(result, []);
+    });
+
+    test('returns empty array on network error', async () => {
+      const { listSessions } = await import('../../service/actions.js');
+      
+      const mockFetch = async () => {
+        throw new Error('Network error');
+      };
+      
+      const result = await listSessions('http://localhost:4096', { fetch: mockFetch });
+      
+      assert.deepStrictEqual(result, []);
+    });
+
+    test('returns empty array when response is not an array', async () => {
+      const { listSessions } = await import('../../service/actions.js');
+      
+      const mockFetch = async () => ({
+        ok: true,
+        json: async () => ({ error: 'unexpected format' }),
+      });
+      
+      const result = await listSessions('http://localhost:4096', { fetch: mockFetch });
+      
+      assert.deepStrictEqual(result, []);
+    });
+  });
+
+  describe('getSessionStatuses', () => {
+    test('fetches session statuses from server', async () => {
+      const { getSessionStatuses } = await import('../../service/actions.js');
+      
+      const mockFetch = async () => ({
+        ok: true,
+        json: async () => ({
+          'ses_1': { type: 'busy' },
+          'ses_2': { type: 'idle' },
+        }),
+      });
+      
+      const result = await getSessionStatuses('http://localhost:4096', { fetch: mockFetch });
+      
+      assert.strictEqual(result['ses_1'].type, 'busy');
+      assert.strictEqual(result['ses_2'].type, 'idle');
+    });
+
+    test('returns empty object on server error', async () => {
+      const { getSessionStatuses } = await import('../../service/actions.js');
+      
+      const mockFetch = async () => ({
+        ok: false,
+        status: 500,
+      });
+      
+      const result = await getSessionStatuses('http://localhost:4096', { fetch: mockFetch });
+      
+      assert.deepStrictEqual(result, {});
+    });
+
+    test('returns empty object on network error', async () => {
+      const { getSessionStatuses } = await import('../../service/actions.js');
+      
+      const mockFetch = async () => {
+        throw new Error('Connection refused');
+      };
+      
+      const result = await getSessionStatuses('http://localhost:4096', { fetch: mockFetch });
+      
+      assert.deepStrictEqual(result, {});
+    });
+  });
+
+  describe('findReusableSession', () => {
+    test('finds best idle session from list', async () => {
+      const { findReusableSession } = await import('../../service/actions.js');
+      
+      const mockFetch = async (url) => {
+        if (url.includes('/session/status')) {
+          return {
+            ok: true,
+            json: async () => ({
+              'ses_busy': { type: 'busy' },
+              // ses_idle not in status map = idle
+            }),
+          };
+        }
+        // GET /session
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'ses_busy', time: { created: 1000, updated: 3000 } },
+            { id: 'ses_idle', time: { created: 1000, updated: 2000 } },
+          ],
+        };
+      };
+      
+      const result = await findReusableSession('http://localhost:4096', '/test/dir', { fetch: mockFetch });
+      
+      assert.strictEqual(result.id, 'ses_idle');
+    });
+
+    test('returns null when all sessions are archived', async () => {
+      const { findReusableSession } = await import('../../service/actions.js');
+      
+      const mockFetch = async (url) => {
+        if (url.includes('/session/status')) {
+          return { ok: true, json: async () => ({}) };
+        }
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'ses_1', time: { created: 1000, updated: 2000, archived: 3000 } },
+            { id: 'ses_2', time: { created: 1000, updated: 2000, archived: 3000 } },
+          ],
+        };
+      };
+      
+      const result = await findReusableSession('http://localhost:4096', '/test/dir', { fetch: mockFetch });
+      
+      assert.strictEqual(result, null);
+    });
+
+    test('returns null when no sessions exist', async () => {
+      const { findReusableSession } = await import('../../service/actions.js');
+      
+      const mockFetch = async (url) => {
+        if (url.includes('/session/status')) {
+          return { ok: true, json: async () => ({}) };
+        }
+        return { ok: true, json: async () => [] };
+      };
+      
+      const result = await findReusableSession('http://localhost:4096', '/test/dir', { fetch: mockFetch });
+      
+      assert.strictEqual(result, null);
+    });
+
+    test('prefers most recently updated idle session', async () => {
+      const { findReusableSession } = await import('../../service/actions.js');
+      
+      const mockFetch = async (url) => {
+        if (url.includes('/session/status')) {
+          return { ok: true, json: async () => ({}) }; // all idle
+        }
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'ses_old', time: { created: 1000, updated: 2000 } },
+            { id: 'ses_new', time: { created: 1000, updated: 5000 } },
+            { id: 'ses_mid', time: { created: 1000, updated: 3000 } },
+          ],
+        };
+      };
+      
+      const result = await findReusableSession('http://localhost:4096', '/test/dir', { fetch: mockFetch });
+      
+      assert.strictEqual(result.id, 'ses_new');
+    });
+
+    test('falls back to busy session when no idle available', async () => {
+      const { findReusableSession } = await import('../../service/actions.js');
+      
+      const mockFetch = async (url) => {
+        if (url.includes('/session/status')) {
+          return {
+            ok: true,
+            json: async () => ({
+              'ses_busy1': { type: 'busy' },
+              'ses_busy2': { type: 'retry' },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'ses_busy1', time: { created: 1000, updated: 2000 } },
+            { id: 'ses_busy2', time: { created: 1000, updated: 4000 } },
+          ],
+        };
+      };
+      
+      const result = await findReusableSession('http://localhost:4096', '/test/dir', { fetch: mockFetch });
+      
+      // Should return most recently updated busy session
+      assert.strictEqual(result.id, 'ses_busy2');
     });
   });
 });
