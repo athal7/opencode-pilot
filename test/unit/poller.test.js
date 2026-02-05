@@ -786,6 +786,31 @@ describe('poller.js', () => {
       
       assert.strictEqual(mapped.number, undefined);
     });
+
+    test('maps commentsCount to comments for GitHub PR enrichment', async () => {
+      const { applyMappings } = await import('../../service/poller.js');
+      
+      // gh search prs returns commentsCount, but enrichItemsWithComments checks for 'comments'
+      const item = {
+        number: 123,
+        title: 'Fix mobile overflow',
+        commentsCount: 4,
+        repository: { nameWithOwner: 'anomalyco/opencode' }
+      };
+      const mappings = {
+        comments: 'commentsCount',
+        repository_full_name: 'repository.nameWithOwner'
+      };
+      
+      const mapped = applyMappings(item, mappings);
+      
+      // comments field should be set from commentsCount
+      assert.strictEqual(mapped.comments, 4);
+      // Original commentsCount preserved
+      assert.strictEqual(mapped.commentsCount, 4);
+      // Other mappings work too
+      assert.strictEqual(mapped.repository_full_name, 'anomalyco/opencode');
+    });
   });
 
   describe('fetchGitHubComments', () => {

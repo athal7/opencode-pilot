@@ -10,6 +10,7 @@ _provider:
     html_url: url
     repository_full_name: repository.nameWithOwner
     updated_at: updatedAt
+    comments: commentsCount
   # Reprocess items when state changes (e.g., reopened issues)
   # Note: updated_at is NOT included because our own changes would trigger reprocessing
   reprocess_on:
