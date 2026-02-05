@@ -136,6 +136,29 @@ describe('poller.js', () => {
       assert.strictEqual(poller.getProcessedIds().length, 1);
     });
 
+    test('getProcessedMeta returns stored metadata', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      
+      // Not processed yet
+      assert.strictEqual(poller.getProcessedMeta('item-1'), null);
+      
+      // Mark as processed with metadata including directory
+      poller.markProcessed('item-1', { 
+        source: 'test',
+        directory: '/worktree/pr-123',
+        itemState: 'open',
+      });
+      
+      const meta = poller.getProcessedMeta('item-1');
+      assert.ok(meta);
+      assert.strictEqual(meta.source, 'test');
+      assert.strictEqual(meta.directory, '/worktree/pr-123');
+      assert.strictEqual(meta.itemState, 'open');
+      assert.ok(meta.processedAt); // Should have timestamp
+    });
+
     test('persists state across instances', async () => {
       const { createPoller } = await import('../../service/poller.js');
       

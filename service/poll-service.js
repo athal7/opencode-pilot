@@ -200,10 +200,14 @@ export async function pollOnce(options = {}) {
     debug(`Processing ${sortedItems.length} sorted items`);
     for (const item of sortedItems) {
       // Check if already processed
+      let existingDirectory = null;
       if (pollerInstance && pollerInstance.isProcessed(item.id)) {
         // Check if item should be reprocessed (reopened, status changed, etc.)
         if (pollerInstance.shouldReprocess(item, { reprocessOn })) {
           debug(`Reprocessing ${item.id} - state changed`);
+          // Get the stored directory before clearing state (for worktree reuse)
+          const prevMeta = pollerInstance.getProcessedMeta(item.id);
+          existingDirectory = prevMeta?.directory || null;
           pollerInstance.clearProcessed(item.id);
           console.log(`[poll] Reprocessing ${item.id} (reopened or updated)`);
         } else {
@@ -215,6 +219,12 @@ export async function pollOnce(options = {}) {
       debug(`Executing action for ${item.id}`);
       // Build action config from source and item (resolves repo from item fields)
       const actionConfig = buildActionConfigForItem(source, item);
+      
+      // Pass existing directory for worktree reuse when reprocessing
+      if (existingDirectory) {
+        actionConfig.existing_directory = existingDirectory;
+        debug(`Reusing existing directory: ${existingDirectory}`);
+      }
 
       // Skip items with no valid local path (prevents sessions in home directory)
       const hasLocalPath = actionConfig.working_dir || actionConfig.path || actionConfig.repo_path;
@@ -244,11 +254,13 @@ export async function pollOnce(options = {}) {
           if (result.success) {
             // Mark as processed to avoid re-triggering
             // Store item state for detecting reopened/updated items
+            // Store directory for worktree reuse when reprocessing
             if (pollerInstance) {
               pollerInstance.markProcessed(item.id, { 
                 repoKey: item.repo_key, 
                 command: result.command,
                 source: sourceName,
+                directory: result.directory || null,
                 itemState: item.state || item.status || null,
                 itemUpdatedAt: item.updated_at || null,
               });

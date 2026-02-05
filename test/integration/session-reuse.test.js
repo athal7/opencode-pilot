@@ -566,4 +566,57 @@ describe("integration: worktree creation with worktree_name", () => {
     assert.ok(sessionCreated, "Should create session");
     assert.strictEqual(sessionDirectory, "/worktree/pr-42", "Session should be in worktree directory");
   });
+
+  it("reuses stored directory when reprocessing same item", async () => {
+    // This tests the scenario where:
+    // 1. Item was processed before, worktree created with random name (e.g., "calm-wizard")
+    // 2. Item triggers again (e.g., new feedback)
+    // 3. We should reuse the stored directory, not create a new worktree
+    
+    let worktreeListCalled = false;
+    let worktreeCreateCalled = false;
+    let sessionDirectory = null;
+    
+    // Existing worktree has a random name, not "pr-42"
+    const existingWorktreeDir = "/worktree/calm-wizard";
+    
+    const mockServer = await createMockServer({
+      "GET /experimental/worktree": () => {
+        worktreeListCalled = true;
+        // Return existing worktree with random name
+        return { body: [existingWorktreeDir] };
+      },
+      "POST /experimental/worktree": () => {
+        worktreeCreateCalled = true;
+        return { body: { name: "pr-42", directory: "/worktree/pr-42" } };
+      },
+      "GET /session": () => ({ body: [] }),
+      "GET /session/status": () => ({ body: {} }),
+      "POST /session": (req) => {
+        sessionDirectory = req.query?.directory;
+        return { body: { id: "ses_reprocess" } };
+      },
+      "PATCH /session/ses_reprocess": () => ({ body: {} }),
+      "POST /session/ses_reprocess/message": () => ({ body: { success: true } }),
+    });
+
+    // Simulate reprocessing with a stored directory from previous run
+    const result = await executeAction(
+      { number: 42, title: "Review PR" },
+      { 
+        path: "/proj", 
+        prompt: "review",
+        worktree_name: "pr-{number}",
+        // This is the key: pass the directory we used last time
+        existing_directory: existingWorktreeDir,
+      },
+      { discoverServer: async () => mockServer.url }
+    );
+
+    assert.ok(result.success, "Action should succeed");
+    // Should NOT create a new worktree since we have existing_directory
+    assert.strictEqual(worktreeCreateCalled, false, "Should NOT create new worktree when existing_directory provided");
+    // Session should be created in the existing directory
+    assert.strictEqual(sessionDirectory, existingWorktreeDir, "Session should use existing directory");
+  });
 });

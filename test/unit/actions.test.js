@@ -888,6 +888,75 @@ Check for bugs and security issues.`;
       assert.ok(result.command.includes('/data/worktree/proj/pr-123'), 
         'Should use new worktree directory');
     });
+
+    test('uses existing_directory without creating new worktree', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+      
+      const item = { number: 123, title: 'Review PR #123' };
+      const config = {
+        path: '/data/proj',
+        prompt: 'review',
+        worktree_name: 'pr-{number}',
+        // This is the key - pass an existing directory from a previous run
+        existing_directory: '/data/worktree/calm-wizard',
+      };
+      
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      
+      let worktreeListCalled = false;
+      let worktreeCreateCalled = false;
+      let sessionDirectory = null;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        // Track if worktree endpoints are called (they shouldn't be)
+        if (urlObj.pathname === '/experimental/worktree') {
+          if (opts?.method === 'POST') {
+            worktreeCreateCalled = true;
+          } else {
+            worktreeListCalled = true;
+          }
+          return { ok: true, json: async () => [] };
+        }
+        
+        // No existing sessions
+        if (urlObj.pathname === '/session' && !opts?.method) {
+          return { ok: true, json: async () => [] };
+        }
+        if (urlObj.pathname === '/session/status') {
+          return { ok: true, json: async () => ({}) };
+        }
+        
+        // Session creation - capture the directory
+        if (urlObj.pathname === '/session' && opts?.method === 'POST') {
+          sessionDirectory = urlObj.searchParams.get('directory');
+          return { ok: true, json: async () => ({ id: 'ses_test' }) };
+        }
+        
+        // Other session endpoints
+        if (urlObj.pathname.includes('/session/')) {
+          return { ok: true, json: async () => ({}) };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await executeAction(item, config, { 
+        discoverServer: mockDiscoverServer,
+        fetch: mockFetch
+      });
+      
+      assert.ok(result.success);
+      // Should NOT call worktree endpoints when existing_directory is provided
+      assert.strictEqual(worktreeListCalled, false, 'Should NOT list worktrees');
+      assert.strictEqual(worktreeCreateCalled, false, 'Should NOT create worktree');
+      // Should use the existing directory
+      assert.strictEqual(sessionDirectory, '/data/worktree/calm-wizard', 
+        'Should use existing_directory for session');
+      assert.strictEqual(result.directory, '/data/worktree/calm-wizard',
+        'Result should include directory');
+    });
   });
 
   describe('createSessionViaApi', () => {

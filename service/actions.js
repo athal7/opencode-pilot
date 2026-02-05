@@ -800,6 +800,82 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
 }
 
 /**
+ * Execute session creation/reuse in a specific directory
+ * Internal helper for executeAction - handles prompt building, session reuse, and API calls
+ * 
+ * @param {string} serverUrl - OpenCode server URL
+ * @param {string} cwd - Working directory for the session
+ * @param {object} item - Item to create session for
+ * @param {object} config - Repo config with action settings
+ * @param {object} [options] - Execution options
+ * @returns {Promise<object>} Result with command, success, sessionId, etc.
+ */
+async function executeInDirectory(serverUrl, cwd, item, config, options = {}) {
+  // Build prompt from template
+  const prompt = buildPromptFromTemplate(config.prompt || "default", item);
+  
+  // Build session title
+  const sessionTitle = config.session?.name
+    ? buildSessionName(config.session.name, item)
+    : (item.title || `session-${Date.now()}`);
+  
+  // Check if we should try to reuse an existing session
+  const reuseActiveSession = config.reuse_active_session !== false; // default true
+  
+  if (reuseActiveSession && !options.dryRun) {
+    const existingSession = await findReusableSession(serverUrl, cwd, { fetch: options.fetch });
+    
+    if (existingSession) {
+      debug(`executeInDirectory: found reusable session ${existingSession.id} for ${cwd}`);
+      
+      const reuseCommand = `[API] POST ${serverUrl}/session/${existingSession.id}/message (reusing session)`;
+      
+      const result = await sendMessageToSession(serverUrl, existingSession.id, cwd, prompt, {
+        title: sessionTitle,
+        agent: config.agent,
+        model: config.model,
+        fetch: options.fetch,
+      });
+      
+      return {
+        command: reuseCommand,
+        success: result.success,
+        sessionId: result.sessionId,
+        directory: cwd,
+        sessionReused: true,
+        error: result.error,
+      };
+    }
+  }
+  
+  const apiCommand = `[API] POST ${serverUrl}/session?directory=${cwd}`;
+  debug(`executeInDirectory: using HTTP API - ${apiCommand}`);
+  
+  if (options.dryRun) {
+    return {
+      command: apiCommand,
+      directory: cwd,
+      dryRun: true,
+    };
+  }
+  
+  const result = await createSessionViaApi(serverUrl, cwd, prompt, {
+    title: sessionTitle,
+    agent: config.agent,
+    model: config.model,
+    fetch: options.fetch,
+  });
+  
+  return {
+    command: apiCommand,
+    success: result.success,
+    sessionId: result.sessionId,
+    directory: cwd,
+    error: result.error,
+  };
+}
+
+/**
  * Execute an action
  * @param {object} item - Item to create session for
  * @param {object} config - Repo config with action settings
@@ -839,6 +915,14 @@ export async function executeAction(item, config, options = {}) {
       skipped: true,
       error: 'No OpenCode server found. Will retry on next poll.',
     };
+  }
+  
+  // If existing_directory is provided (reprocessing same item), use it directly
+  // This preserves the worktree from the previous run even if its name doesn't match the template
+  if (config.existing_directory) {
+    debug(`executeAction: using existing_directory=${config.existing_directory}`);
+    const cwd = expandPath(config.existing_directory);
+    return await executeInDirectory(serverUrl, cwd, item, config, options);
   }
   
   // Resolve worktree directory if configured
@@ -890,63 +974,5 @@ export async function executeAction(item, config, options = {}) {
   
   debug(`executeAction: using cwd=${cwd}`);
   
-  // Build prompt from template
-  const prompt = buildPromptFromTemplate(config.prompt || "default", item);
-  
-  // Build session title
-  const sessionTitle = config.session?.name
-    ? buildSessionName(config.session.name, item)
-    : (item.title || `session-${Date.now()}`);
-  
-  // Check if we should try to reuse an existing session
-  const reuseActiveSession = config.reuse_active_session !== false; // default true
-  
-  if (reuseActiveSession && !options.dryRun) {
-    const existingSession = await findReusableSession(serverUrl, cwd, { fetch: options.fetch });
-    
-    if (existingSession) {
-      debug(`executeAction: found reusable session ${existingSession.id} for ${cwd}`);
-      
-      const reuseCommand = `[API] POST ${serverUrl}/session/${existingSession.id}/message (reusing session)`;
-      
-      const result = await sendMessageToSession(serverUrl, existingSession.id, cwd, prompt, {
-        title: sessionTitle,
-        agent: config.agent,
-        model: config.model,
-        fetch: options.fetch,
-      });
-      
-      return {
-        command: reuseCommand,
-        success: result.success,
-        sessionId: result.sessionId,
-        sessionReused: true,
-        error: result.error,
-      };
-    }
-  }
-  
-  const apiCommand = `[API] POST ${serverUrl}/session?directory=${cwd}`;
-  debug(`executeAction: using HTTP API - ${apiCommand}`);
-  
-  if (options.dryRun) {
-    return {
-      command: apiCommand,
-      dryRun: true,
-    };
-  }
-  
-  const result = await createSessionViaApi(serverUrl, cwd, prompt, {
-    title: sessionTitle,
-    agent: config.agent,
-    model: config.model,
-    fetch: options.fetch,
-  });
-  
-  return {
-    command: apiCommand,
-    success: result.success,
-    sessionId: result.sessionId,
-    error: result.error,
-  };
+  return await executeInDirectory(serverUrl, cwd, item, config, options);
 }

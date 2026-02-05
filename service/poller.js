@@ -723,6 +723,15 @@ export function createPoller(options = {}) {
     },
     
     /**
+     * Get metadata for a processed item
+     * @param {string} itemId - Item ID
+     * @returns {object|null} Metadata or null if not processed
+     */
+    getProcessedMeta(itemId) {
+      return processedItems.get(itemId) || null;
+    },
+    
+    /**
      * Mark an item as processed
      */
     markProcessed(itemId, metadata = {}) {
