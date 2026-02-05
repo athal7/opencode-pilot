@@ -21,6 +21,14 @@ import {
   resolveWorktreeDirectory,
 } from "../../service/worktree.js";
 
+import {
+  computeAttentionLabels,
+} from "../../service/poller.js";
+
+import {
+  evaluateReadiness,
+} from "../../service/readiness.js";
+
 /**
  * Create a mock OpenCode server for testing
  */
@@ -343,5 +351,219 @@ describe("integration: sandbox reuse", () => {
 
     assert.strictEqual(result.directory, "/worktree/my-branch");
     assert.strictEqual(listDirectory, "/path/to/project", "Should pass directory when looking up named worktree");
+  });
+});
+
+describe("integration: PR attention detection", () => {
+  /**
+   * These tests verify the full flow of PR attention detection:
+   * 1. PRs with merge conflicts should be detected as needing attention
+   * 2. PRs with human feedback should be detected as needing attention
+   * 3. PRs with only bot comments but conflicts should still be ready (require_attention mode)
+   * 4. computeAttentionLabels + evaluateReadiness work together correctly
+   */
+
+  it("PR with conflicts and only bot comments is ready when require_attention is set", () => {
+    // This is the key scenario that was broken: PR has merge conflicts but no human feedback
+    // With require_attention, it should be ready because conflicts count as "attention needed"
+    const items = [{
+      number: 123,
+      title: "Test PR",
+      user: { login: "author" },
+      _mergeable: "CONFLICTING",
+      _comments: [
+        { user: { login: "github-actions[bot]", type: "Bot" }, body: "CI passed" },
+        { user: { login: "codecov[bot]", type: "Bot" }, body: "Coverage report" },
+      ],
+    }];
+
+    // Step 1: Compute attention labels (happens in poll-service)
+    const labeled = computeAttentionLabels(items, {});
+    
+    assert.strictEqual(labeled[0]._attention_label, "Conflicts");
+    assert.strictEqual(labeled[0]._has_attention, true);
+
+    // Step 2: Evaluate readiness with require_attention config
+    const config = {
+      readiness: {
+        require_attention: true,
+      },
+    };
+    const result = evaluateReadiness(labeled[0], config);
+
+    assert.strictEqual(result.ready, true, "PR with conflicts should be ready even with only bot comments");
+  });
+
+  it("PR with human feedback is ready when require_attention is set", () => {
+    const items = [{
+      number: 456,
+      title: "Another PR",
+      user: { login: "author" },
+      _mergeable: "MERGEABLE",
+      _comments: [
+        { user: { login: "reviewer", type: "User" }, body: "Please fix the tests" },
+      ],
+    }];
+
+    const labeled = computeAttentionLabels(items, {});
+    
+    assert.strictEqual(labeled[0]._attention_label, "Feedback");
+    assert.strictEqual(labeled[0]._has_attention, true);
+
+    const config = {
+      readiness: {
+        require_attention: true,
+      },
+    };
+    const result = evaluateReadiness(labeled[0], config);
+
+    assert.strictEqual(result.ready, true, "PR with human feedback should be ready");
+  });
+
+  it("PR with both conflicts and feedback shows combined label", () => {
+    const items = [{
+      number: 789,
+      title: "Complex PR",
+      user: { login: "author" },
+      _mergeable: "CONFLICTING",
+      _comments: [
+        { user: { login: "reviewer", type: "User" }, body: "Needs changes" },
+      ],
+    }];
+
+    const labeled = computeAttentionLabels(items, {});
+    
+    assert.strictEqual(labeled[0]._attention_label, "Conflicts+Feedback");
+    assert.strictEqual(labeled[0]._has_attention, true);
+
+    const config = {
+      readiness: {
+        require_attention: true,
+      },
+    };
+    const result = evaluateReadiness(labeled[0], config);
+
+    assert.strictEqual(result.ready, true);
+  });
+
+  it("PR without conflicts or feedback is NOT ready when require_attention is set", () => {
+    const items = [{
+      number: 999,
+      title: "Clean PR",
+      user: { login: "author" },
+      _mergeable: "MERGEABLE",
+      _comments: [
+        { user: { login: "github-actions[bot]", type: "Bot" }, body: "CI passed" },
+      ],
+    }];
+
+    const labeled = computeAttentionLabels(items, {});
+    
+    assert.strictEqual(labeled[0]._attention_label, "PR");
+    assert.strictEqual(labeled[0]._has_attention, false);
+
+    const config = {
+      readiness: {
+        require_attention: true,
+      },
+    };
+    const result = evaluateReadiness(labeled[0], config);
+
+    assert.strictEqual(result.ready, false, "PR without attention conditions should NOT be ready");
+    assert.ok(result.reason.includes("no attention needed"), "Should have appropriate reason");
+  });
+
+  it("PR with only bot comments is NOT ready when require_attention is NOT set", () => {
+    // Without require_attention, the strict bot check applies
+    const pr = {
+      number: 111,
+      title: "Test",
+      user: { login: "author" },
+      _comments: [
+        { user: { login: "github-actions[bot]", type: "Bot" }, body: "CI passed" },
+      ],
+    };
+
+    const config = {}; // No require_attention
+
+    const result = evaluateReadiness(pr, config);
+
+    assert.strictEqual(result.ready, false, "Without require_attention, bot-only comments should fail");
+    assert.ok(result.reason.includes("bot"), "Should mention bot in reason");
+  });
+});
+
+describe("integration: worktree creation with worktree_name", () => {
+  let mockServer;
+
+  afterEach(async () => {
+    if (mockServer) {
+      await mockServer.close();
+      mockServer = null;
+    }
+  });
+
+  it("executeAction creates worktree when worktree_name is set but project has no sandboxes", async () => {
+    let worktreeListCalled = false;
+    let worktreeCreateCalled = false;
+    let createdWorktreeName = null;
+    let sessionCreated = false;
+    let sessionDirectory = null;
+
+    mockServer = await createMockServer({
+      // Project has no sandboxes
+      "GET /project": () => ({
+        body: [{ id: "proj_1", worktree: "/proj", sandboxes: [], time: { created: 1 } }],
+      }),
+      "GET /project/current": () => ({
+        body: { id: "proj_1", worktree: "/proj", sandboxes: [], time: { created: 1 } },
+      }),
+      // No existing worktrees
+      "GET /experimental/worktree": () => {
+        worktreeListCalled = true;
+        return { body: [] };
+      },
+      // Worktree creation
+      "POST /experimental/worktree": (req) => {
+        worktreeCreateCalled = true;
+        createdWorktreeName = req.body?.name;
+        return {
+          body: {
+            name: req.body?.name || "new-wt",
+            directory: `/worktree/${req.body?.name || "new-wt"}`,
+          },
+        };
+      },
+      // No existing sessions
+      "GET /session": () => ({ body: [] }),
+      "GET /session/status": () => ({ body: {} }),
+      // Session creation
+      "POST /session": (req) => {
+        sessionCreated = true;
+        // Extract directory from URL
+        const url = new URL(req.path, "http://localhost");
+        sessionDirectory = req.query?.directory;
+        return { body: { id: "ses_new" } };
+      },
+      "PATCH /session/ses_new": () => ({ body: {} }),
+      "POST /session/ses_new/message": () => ({ body: { success: true } }),
+    });
+
+    const result = await executeAction(
+      { number: 42, title: "Review PR" },
+      { 
+        path: "/proj", 
+        prompt: "review",
+        worktree_name: "pr-{number}", // This should trigger worktree creation
+      },
+      { discoverServer: async () => mockServer.url }
+    );
+
+    assert.ok(result.success, "Action should succeed");
+    assert.ok(worktreeListCalled, "Should check for existing worktrees");
+    assert.ok(worktreeCreateCalled, "Should create worktree when worktree_name is configured");
+    assert.strictEqual(createdWorktreeName, "pr-42", "Should expand worktree_name template");
+    assert.ok(sessionCreated, "Should create session");
+    assert.strictEqual(sessionDirectory, "/worktree/pr-42", "Session should be in worktree directory");
   });
 });

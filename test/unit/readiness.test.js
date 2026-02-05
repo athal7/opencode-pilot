@@ -675,5 +675,56 @@ describe('readiness.js', () => {
       
       assert.strictEqual(result.ready, true);
     });
+
+    test('passes when PR has conflicts but only bot comments (require_attention skips bot check)', async () => {
+      const { evaluateReadiness } = await import('../../service/readiness.js');
+      
+      // This is the key scenario: PR has merge conflicts but no human feedback
+      // With require_attention, the checkBotComments check should be skipped
+      // because checkAttention handles the combined logic via _has_attention
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        user: { login: 'author' },
+        _mergeable: 'CONFLICTING',
+        _comments: [
+          { user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'CI passed' },
+        ],
+        _has_attention: true,
+        _attention_label: 'Conflicts'
+      };
+      const config = {
+        readiness: {
+          require_attention: true
+        }
+      };
+      
+      const result = evaluateReadiness(pr, config);
+      
+      // Should be ready because it has conflicts (via _has_attention)
+      // even though it only has bot comments
+      assert.strictEqual(result.ready, true);
+    });
+
+    test('still fails bot check when require_attention is NOT configured', async () => {
+      const { evaluateReadiness } = await import('../../service/readiness.js');
+      
+      // Without require_attention, the strict bot check applies
+      const pr = {
+        number: 123,
+        title: 'Test PR',
+        user: { login: 'author' },
+        _comments: [
+          { user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'CI passed' },
+        ]
+      };
+      const config = {};
+      
+      const result = evaluateReadiness(pr, config);
+      
+      // Should fail because no human feedback and no require_attention bypass
+      assert.strictEqual(result.ready, false);
+      assert.ok(result.reason.includes('bot'));
+    });
   });
 });

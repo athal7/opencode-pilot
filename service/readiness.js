@@ -348,13 +348,18 @@ export function evaluateReadiness(issue, config) {
   }
 
   // Check bot comments (for PRs enriched with _comments)
-  const botResult = checkBotComments(issue, config);
-  if (!botResult.ready) {
-    return {
-      ready: false,
-      reason: botResult.reason,
-      priority: 0,
-    };
+  // Skip this check when require_attention is set, because checkAttention
+  // handles the combined logic (conflicts OR feedback) via _has_attention
+  const readinessConfig = config.readiness || {};
+  if (!readinessConfig.require_attention) {
+    const botResult = checkBotComments(issue, config);
+    if (!botResult.ready) {
+      return {
+        ready: false,
+        reason: botResult.reason,
+        priority: 0,
+      };
+    }
   }
 
   // Check mergeable status (for PRs enriched with _mergeable)

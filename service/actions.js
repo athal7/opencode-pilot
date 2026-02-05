@@ -845,7 +845,15 @@ export async function executeAction(item, config, options = {}) {
   // This allows creating sessions in isolated worktrees instead of the main project
   let worktreeMode = config.worktree;
   
+  // If worktree_name is configured, enable worktree mode (explicit configuration)
+  // This allows presets to specify worktree isolation without requiring existing sandboxes
+  if (!worktreeMode && config.worktree_name) {
+    debug(`executeAction: worktree_name configured, enabling worktree mode`);
+    worktreeMode = 'new';
+  }
+  
   // Auto-detect worktree support: check if the project has sandboxes
+  // This is a fallback for when worktree isn't explicitly configured
   if (!worktreeMode) {
     // Look up project info for this specific directory (not just /project/current)
     const projectInfo = await getProjectInfoForDirectory(serverUrl, baseCwd, { fetch: options.fetch });
