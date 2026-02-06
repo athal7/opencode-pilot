@@ -558,15 +558,12 @@ export async function enrichItemsWithComments(items, source, options = {}) {
   }
   
   // Fetch comments for each item (could be parallelized with Promise.all for speed)
+  // Note: Always fetch reviews - commentsCount from gh search only counts issue comments,
+  // not PR reviews or PR review comments. PRs with only review feedback would be missed.
   const enrichedItems = [];
   for (const item of items) {
-    // Only fetch if item has comments
-    if (item.comments > 0) {
-      const comments = await fetchGitHubComments(item, options);
-      enrichedItems.push({ ...item, _comments: comments });
-    } else {
-      enrichedItems.push(item);
-    }
+    const comments = await fetchGitHubComments(item, options);
+    enrichedItems.push({ ...item, _comments: comments });
   }
   
   return enrichedItems;

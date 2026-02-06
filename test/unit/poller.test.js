@@ -1113,7 +1113,10 @@ describe('poller.js', () => {
       assert.strictEqual(result[0]._comments, undefined);
     });
 
-    test('skips items with zero comments', async () => {
+    test('enriches items with zero commentsCount (PR reviews not counted in commentsCount)', async () => {
+      // This test verifies the fix for a bug where PRs with review feedback but
+      // zero issue comments were not enriched. GitHub's commentsCount only counts
+      // issue comments, not PR reviews or PR review comments.
       const { enrichItemsWithComments } = await import('../../service/poller.js');
       
       const items = [
@@ -1127,10 +1130,13 @@ describe('poller.js', () => {
       
       const result = await enrichItemsWithComments(items, source);
       
-      // Items returned unchanged (no API calls made)
+      // Items should be enriched with _comments (empty array if no feedback found)
+      // The actual API call may fail in test environment, but items should still
+      // have _comments set (either to fetched comments or empty array on error)
       assert.strictEqual(result.length, 2);
-      assert.strictEqual(result[0]._comments, undefined);
-      assert.strictEqual(result[1]._comments, undefined);
+      // _comments should be defined (array) - we always try to fetch now
+      assert.ok(Array.isArray(result[0]._comments), 'First item should have _comments array');
+      assert.ok(Array.isArray(result[1]._comments), 'Second item should have _comments array');
     });
 
     test('identifies GitHub MCP source correctly', async () => {
@@ -1142,9 +1148,10 @@ describe('poller.js', () => {
         tool: { mcp: 'github', name: 'search_issues' }
       };
       
-      // Should not throw, just skip due to 0 comments
+      // Should try to fetch comments (may return empty array on API error in tests)
       const result = await enrichItemsWithComments(items, source);
       assert.strictEqual(result.length, 1);
+      assert.ok(Array.isArray(result[0]._comments), 'Should have _comments array');
     });
 
     test('identifies GitHub CLI source correctly', async () => {
@@ -1156,9 +1163,10 @@ describe('poller.js', () => {
         tool: { command: ['gh', 'search', 'issues', '--json', 'number'] }
       };
       
-      // Should not throw, just skip due to 0 comments
+      // Should try to fetch comments (may return empty array on API error in tests)
       const result = await enrichItemsWithComments(items, source);
       assert.strictEqual(result.length, 1);
+      assert.ok(Array.isArray(result[0]._comments), 'Should have _comments array');
     });
   });
 
