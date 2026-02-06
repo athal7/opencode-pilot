@@ -18,6 +18,7 @@ class OpencodePilot < Formula
     log_path var/"log/opencode-pilot.log"
     error_log_path var/"log/opencode-pilot.error.log"
     working_dir Dir.home
+    environment_variables PATH: "#{HOMEBREW_PREFIX}/bin:#{HOMEBREW_PREFIX}/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
   end
 
   def caveats
