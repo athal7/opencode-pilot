@@ -13,8 +13,23 @@ Automation daemon for [OpenCode](https://github.com/sst/opencode) - polls for wo
 
 ## Installation
 
+### Homebrew (recommended)
+
+```bash
+brew tap athal7/opencode-pilot
+brew install opencode-pilot
+
+# Start the service (runs at login)
+brew services start opencode-pilot
+```
+
+Upgrade with `brew upgrade opencode-pilot`.
+
+### npm (alternative)
+
 ```bash
 npm install -g opencode-pilot
+opencode-pilot start
 ```
 
 ## Quick Start
@@ -23,19 +38,13 @@ npm install -g opencode-pilot
 
 2. **Create templates** - Add prompt templates to `~/.config/opencode/pilot/templates/`
 
-3. **Enable the plugin** - Add to your `opencode.json`:
-
-   ```json
-   {
-     "plugin": ["opencode-pilot"]
-   }
-   ```
-
-   The daemon will auto-start when OpenCode launches. If a newer version of the plugin is installed, the daemon will automatically restart to pick up the new version.
-
-   Or start manually:
+3. **Start the service**:
 
    ```bash
+   # If installed via Homebrew:
+   brew services start opencode-pilot
+
+   # If installed via npm:
    opencode-pilot start
    ```
 
