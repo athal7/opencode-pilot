@@ -44,13 +44,11 @@ jobs:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    outputs:
-      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
-      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -67,41 +65,11 @@ jobs:
         run: npm install
 
       - name: Run semantic-release
-        id: semantic
         run: npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
-
-  update-formula:
-    needs: release
-    if: needs.release.outputs.new_release_published == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update Homebrew formula
-        run: |
-          VERSION="${{ needs.release.outputs.new_release_version }}"
-          TARBALL_URL="https://github.com/athal7/opencode-pilot/archive/refs/tags/v${VERSION}.tar.gz"
-          
-          # Download and compute SHA256
-          SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | cut -d' ' -f1)
-          
-          # Update formula
-          sed -i "s|url \"https://github.com/athal7/opencode-pilot/archive/refs/tags/v.*\.tar\.gz\"|url \"${TARBALL_URL}\"|" Formula/opencode-pilot.rb
-          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/opencode-pilot.rb
-          
-          echo "Updated formula to v${VERSION} with SHA256: ${SHA256}"
-          cat Formula/opencode-pilot.rb
-
-      - name: Commit and push formula update
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/opencode-pilot.rb
-          git commit -m "chore(brew): update formula to v${{ needs.release.outputs.new_release_version }} [skip ci]" || echo "No changes to commit"
-          git push
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
