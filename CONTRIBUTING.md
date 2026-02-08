@@ -1,4 +1,4 @@
-# Contributing to opencode-ntfy
+# Contributing to opencode-pilot
 
 Thanks for your interest in contributing!
 
@@ -6,84 +6,75 @@ Thanks for your interest in contributing!
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/athal7/opencode-ntfy.git
-   cd opencode-ntfy
+   git clone https://github.com/athal7/opencode-pilot.git
+   cd opencode-pilot
    ```
 
-2. Install the plugin locally for testing:
+2. Install dependencies:
    ```bash
-   ./install.sh
-   ```
-
-3. Set required environment variables:
-   ```bash
-   export NTFY_TOPIC=your-test-topic
+   npm install
    ```
 
 ## Running Tests
 
-Run the full test suite:
 ```bash
-./test/run_tests.bash
+npm test                # Unit tests
+npm run test:integration # Integration tests
+npm run test:all        # All tests
 ```
 
-The test suite includes:
-- **File structure tests** - Verify all plugin files exist
-- **Syntax validation** - Run `node --check` on all JS files
-- **Export structure tests** - Verify expected functions are exported
-- **Integration tests** - Test plugin loads in OpenCode without hanging (requires opencode CLI)
+Tests use the Node.js built-in test runner (`node:test`) with `node:assert`.
 
 ## Writing Tests
 
-Tests live in `test/` using bash test helpers from `test_helper.bash`.
+Tests live in `test/unit/` and `test/integration/`. Each test file follows this pattern:
 
-Example test:
-```bash
-test_my_feature() {
-  # Use assertions from test_helper.bash
-  assert_file_exists "$PLUGIN_DIR/myfile.js"
-  assert_contains "$output" "expected string"
-}
+```js
+import { test, describe } from 'node:test';
+import assert from 'node:assert';
 
-# Register and run
-run_test "my_feature" "test_my_feature"
-```
-
-For JavaScript unit tests, use Node.js inline:
-```bash
-test_function_works() {
-  node --input-type=module -e "
-    import { myFunction } from '../plugin/module.js';
-    if (myFunction() !== 'expected') throw new Error('Failed');
-    console.log('PASS');
-  " || return 1
-}
+describe('myModule', () => {
+  test('does the thing', () => {
+    assert.strictEqual(actual, expected);
+  });
+});
 ```
 
 ## Code Style
 
 - Use ES modules (`import`/`export`)
 - Use `async`/`await` for async operations
-- Log with `[opencode-ntfy]` prefix
+- Log with `[opencode-pilot]` prefix
 - Handle errors gracefully (log, don't crash OpenCode)
-- No external dependencies (use Node.js built-ins only)
+- No external dependencies beyond what's in `package.json`
 
-## Plugin Architecture
+## Project Architecture
 
 ```
 plugin/
-├── index.js      # Main entry point, event handlers
-├── notifier.js   # ntfy HTTP client
-├── callback.js   # HTTP callback server for interactive responses
-├── hostname.js   # Callback host discovery (Tailscale, env, localhost)
-└── nonces.js     # Single-use nonces for callback authentication
+└── index.js              # OpenCode plugin entry point (auto-starts daemon)
+service/
+├── server.js             # HTTP server and polling orchestration
+├── poll-service.js       # Polling lifecycle management
+├── poller.js             # MCP tool polling
+├── actions.js            # Session creation and template expansion
+├── readiness.js          # Evaluate item readiness (labels, deps, priority)
+├── worktree.js           # Git worktree management
+├── repo-config.js        # Repository discovery and config
+├── logger.js             # Debug logging
+├── utils.js              # Shared utilities
+├── version.js            # Package version detection
+└── presets/
+    ├── index.js           # Preset loader
+    ├── github.yaml        # GitHub source presets
+    └── linear.yaml        # Linear source presets
 ```
 
 ## Submitting Changes
 
 1. Create a feature branch: `git checkout -b my-feature`
 2. Make your changes
-3. Run tests: `./test/run_tests.bash`
+3. Run tests: `npm test`
 4. Commit with a clear message following conventional commits:
    - `feat(#1): add idle notifications`
    - `fix(#3): handle network timeout`
@@ -91,12 +82,10 @@ plugin/
 
 ## Releasing
 
-Releases are automated via GitHub Actions. To create a release:
+Releases are automated via [semantic-release](https://github.com/semantic-release/semantic-release) on merge to `main`. The CI pipeline will:
 
-1. Tag the commit: `git tag v1.0.0`
-2. Push the tag: `git push origin v1.0.0`
-
-The release workflow will:
 1. Run tests
-2. Create a tarball
-3. Create a GitHub release with release notes
+2. Determine the next version from commit messages
+3. Publish to npm
+4. Create a GitHub release
+5. Update the Homebrew formula
