@@ -5,7 +5,7 @@
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y bats ripgrep && npm install -g opencode-ai@latest",
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y ripgrep && npm install -g opencode-ai@latest",
   "customizations": {
     "vscode": {
       "extensions": [
