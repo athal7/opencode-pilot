@@ -248,6 +248,36 @@ Check for bugs and security issues.`;
       assert.strictEqual(config.working_dir, '~/workspaces');
     });
 
+    test('defaults model is used when source and repo have no model', async () => {
+      const { getActionConfig } = await import('../../service/actions.js');
+      
+      const source = { name: 'my-issues' };
+      const repoConfig = { path: '~/code/backend' };
+      const defaults = { model: 'anthropic/claude-haiku-3.5' };
+      
+      const config = getActionConfig(source, repoConfig, defaults);
+      
+      assert.strictEqual(config.model, 'anthropic/claude-haiku-3.5');
+    });
+
+    test('source model overrides defaults and repo model', async () => {
+      const { getActionConfig } = await import('../../service/actions.js');
+      
+      const source = {
+        name: 'my-issues',
+        model: 'anthropic/claude-sonnet-4-20250514'
+      };
+      const repoConfig = {
+        path: '~/code/backend',
+        model: 'anthropic/claude-haiku-3.5'
+      };
+      const defaults = { model: 'anthropic/claude-haiku-3.5' };
+      
+      const config = getActionConfig(source, repoConfig, defaults);
+      
+      assert.strictEqual(config.model, 'anthropic/claude-sonnet-4-20250514');
+    });
+
   });
 
   describe('buildCommand', () => {
@@ -1366,6 +1396,74 @@ Check for bugs and security issues.`;
       
       assert.strictEqual(commandBody.agent, 'code', 'Should pass agent');
       assert.strictEqual(commandBody.model, 'anthropic/claude-sonnet-4-20250514', 'Should pass model as string');
+    });
+
+    test('passes model as providerID/modelID to /message endpoint', async () => {
+      const { sendMessageToSession } = await import('../../service/actions.js');
+      
+      let messageBody = null;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
+          messageBody = JSON.parse(opts.body);
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      await sendMessageToSession(
+        'http://localhost:4096',
+        'ses_existing',
+        '/path/to/project',
+        'Fix the bug',
+        { 
+          fetch: mockFetch,
+          model: 'anthropic/claude-haiku-3.5',
+        }
+      );
+      
+      assert.strictEqual(messageBody.providerID, 'anthropic', 'Should parse provider from model');
+      assert.strictEqual(messageBody.modelID, 'claude-haiku-3.5', 'Should parse model ID');
+    });
+
+    test('defaults to anthropic provider when model has no slash', async () => {
+      const { sendMessageToSession } = await import('../../service/actions.js');
+      
+      let messageBody = null;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
+          messageBody = JSON.parse(opts.body);
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      await sendMessageToSession(
+        'http://localhost:4096',
+        'ses_existing',
+        '/path/to/project',
+        'Fix the bug',
+        { 
+          fetch: mockFetch,
+          model: 'claude-haiku-3.5',
+        }
+      );
+      
+      assert.strictEqual(messageBody.providerID, 'anthropic', 'Should default to anthropic provider');
+      assert.strictEqual(messageBody.modelID, 'claude-haiku-3.5', 'Should use full string as model ID');
     });
   });
 

@@ -999,6 +999,45 @@ sources:
       assert.strictEqual(sources[0].model, 'claude-3-sonnet');
     });
 
+    test('defaults model flows through to sources', async () => {
+      writeFileSync(configPath, `
+defaults:
+  model: anthropic/claude-haiku-3.5
+
+sources:
+  - preset: github/my-issues
+  - preset: github/review-requests
+`);
+
+      const { loadRepoConfig, getSources } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      const sources = getSources();
+
+      // Both sources should inherit model from defaults
+      assert.strictEqual(sources[0].model, 'anthropic/claude-haiku-3.5');
+      assert.strictEqual(sources[1].model, 'anthropic/claude-haiku-3.5');
+    });
+
+    test('source model overrides defaults model', async () => {
+      writeFileSync(configPath, `
+defaults:
+  model: anthropic/claude-haiku-3.5
+
+sources:
+  - preset: github/my-issues
+    model: anthropic/claude-sonnet-4-20250514
+  - preset: github/review-requests
+`);
+
+      const { loadRepoConfig, getSources } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      const sources = getSources();
+
+      // First source overrides, second inherits
+      assert.strictEqual(sources[0].model, 'anthropic/claude-sonnet-4-20250514');
+      assert.strictEqual(sources[1].model, 'anthropic/claude-haiku-3.5');
+    });
+
     test('getDefaults returns defaults section', async () => {
       writeFileSync(configPath, `
 defaults:

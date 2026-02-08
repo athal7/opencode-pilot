@@ -19,6 +19,10 @@ repos_dir: ~/code
 defaults:
   agent: plan
   prompt: default
+  # Model selection: override the agent's default model
+  # Format: provider/model-id (e.g., anthropic/claude-sonnet-4-20250514)
+  # If no provider prefix, defaults to "anthropic"
+  # model: anthropic/claude-sonnet-4-20250514
   # Session reuse: append to existing non-archived session instead of creating new
   # Default: true. Set to false to always create new sessions.
   # reuse_active_session: true
@@ -32,6 +36,8 @@ sources:
     prompt: worktree
 
   - preset: github/review-requests
+    # Per-source model override (takes precedence over defaults.model)
+    # model: anthropic/claude-haiku-3.5
 
   # PRs needing attention (conflicts OR human feedback)
   # Session names dynamically indicate the condition: "Conflicts: ...", "Feedback: ...", or "Conflicts+Feedback: ..."

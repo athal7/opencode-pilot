@@ -204,6 +204,40 @@ sources:
       assert.strictEqual(config.worktree_name, 'issue-{number}');
     });
 
+    test('model from source overrides repoConfig model', async () => {
+      const { buildActionConfigFromSource } = await import('../../service/poll-service.js');
+      
+      const source = {
+        name: 'test-source',
+        model: 'anthropic/claude-sonnet-4-20250514'
+      };
+      const repoConfig = {
+        path: '~/code/default',
+        model: 'anthropic/claude-haiku-3.5'
+      };
+      
+      const config = buildActionConfigFromSource(source, repoConfig);
+      
+      assert.strictEqual(config.model, 'anthropic/claude-sonnet-4-20250514');
+    });
+
+    test('falls back to repoConfig model when source has none', async () => {
+      const { buildActionConfigFromSource } = await import('../../service/poll-service.js');
+      
+      const source = {
+        name: 'test-source'
+        // No model
+      };
+      const repoConfig = {
+        path: '~/code/default',
+        model: 'anthropic/claude-haiku-3.5'
+      };
+      
+      const config = buildActionConfigFromSource(source, repoConfig);
+      
+      assert.strictEqual(config.model, 'anthropic/claude-haiku-3.5');
+    });
+
   });
 
   describe('per-item repo resolution', () => {

@@ -57,7 +57,7 @@ See [examples/config.yaml](examples/config.yaml) for a complete example with all
 - **`server_port`** - Preferred OpenCode server port (e.g., `4096`). When multiple OpenCode instances are running, pilot attaches sessions to this port.
 - **`startup_delay`** - Milliseconds to wait before first poll (default: `10000`). Allows OpenCode server time to fully initialize after restart.
 - **`repos_dir`** - Directory containing git repos (e.g., `~/code`). Pilot auto-discovers repos by scanning git remotes (both `origin` and `upstream` for fork support).
-- **`defaults`** - Default values applied to all sources
+- **`defaults`** - Default values applied to all sources (`agent`, `model`, `prompt`, etc.)
 - **`sources`** - What to poll (presets, shorthand, or full config)
 - **`tools`** - Field mappings to normalize different MCP APIs
 - **`repos`** - Explicit repository paths (overrides auto-discovery from `repos_dir`)
@@ -82,6 +82,24 @@ Session names for `my-prs-attention` indicate the condition: "Conflicts: {title}
 ### Prompt Templates
 
 Create prompt templates as markdown files in `~/.config/opencode/pilot/templates/`. Templates support placeholders like `{title}`, `{body}`, `{number}`, `{html_url}`, etc.
+
+### Model Selection
+
+Override the default model used by the agent for pilot sessions. This avoids creating a separate agent just to use a different model.
+
+```yaml
+defaults:
+  agent: plan
+  model: anthropic/claude-sonnet-4-20250514  # Applied to all sources
+
+sources:
+  - preset: github/review-requests
+    model: anthropic/claude-haiku-3.5  # Override for this source only
+```
+
+Format: `provider/model-id` (e.g., `anthropic/claude-sonnet-4-20250514`). If no provider prefix, defaults to `anthropic`.
+
+Priority: source `model` > defaults `model` > agent's built-in default.
 
 ### Session and Sandbox Reuse
 
