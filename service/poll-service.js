@@ -10,7 +10,7 @@
  */
 
 import { loadRepoConfig, getRepoConfig, getAllSources, getToolProviderConfig, resolveRepoForItem, getCleanupTtlDays, getStartupDelay } from "./repo-config.js";
-import { createPoller, pollGenericSource, enrichItemsWithComments, enrichItemsWithMergeable, computeAttentionLabels } from "./poller.js";
+import { createPoller, pollGenericSource, enrichItemsWithComments, enrichItemsWithMergeable, computeAttentionLabels, computeDedupKeys } from "./poller.js";
 import { evaluateReadiness, sortByPriority } from "./readiness.js";
 import { executeAction, buildCommand } from "./actions.js";
 import { debug } from "./logger.js";
@@ -199,7 +199,12 @@ export async function pollOnce(options = {}) {
     
     debug(`Processing ${sortedItems.length} sorted items`);
     for (const item of sortedItems) {
-      // Check if already processed
+      // Compute dedup keys for cross-source deduplication
+      // Context includes repo for resolving relative GitHub refs (#123)
+      const dedupContext = { repo: item.repository_full_name || item.repository?.nameWithOwner };
+      const dedupKeys = computeDedupKeys(item, dedupContext);
+      
+      // Check if already processed (by item ID)
       let existingDirectory = null;
       if (pollerInstance && pollerInstance.isProcessed(item.id)) {
         // Check if item should be reprocessed (reopened, status changed, etc.)
@@ -212,6 +217,16 @@ export async function pollOnce(options = {}) {
           console.log(`[poll] Reprocessing ${item.id} (reopened or updated)`);
         } else {
           debug(`Skipping ${item.id} - already processed`);
+          continue;
+        }
+      }
+      
+      // Check for cross-source deduplication (e.g., Linear issue + GitHub PR)
+      // Skip if any of this item's dedup keys were already processed by another item
+      if (pollerInstance && dedupKeys.length > 0) {
+        const existingItemId = pollerInstance.findProcessedByDedupKey(dedupKeys);
+        if (existingItemId && existingItemId !== item.id) {
+          debug(`Skipping ${item.id} - dedup key matches already-processed item ${existingItemId}`);
           continue;
         }
       }
@@ -255,6 +270,7 @@ export async function pollOnce(options = {}) {
             // Mark as processed to avoid re-triggering
             // Store item state for detecting reopened/updated items
             // Store directory for worktree reuse when reprocessing
+            // Store dedup keys for cross-source deduplication
             if (pollerInstance) {
               pollerInstance.markProcessed(item.id, { 
                 repoKey: item.repo_key, 
@@ -263,6 +279,7 @@ export async function pollOnce(options = {}) {
                 directory: result.directory || null,
                 itemState: item.state || item.status || null,
                 itemUpdatedAt: item.updated_at || null,
+                dedupKeys: dedupKeys.length > 0 ? dedupKeys : undefined,
               });
             }
             if (result.warning) {

@@ -620,3 +620,116 @@ describe("integration: worktree creation with worktree_name", () => {
     assert.strictEqual(sessionDirectory, existingWorktreeDir, "Session should use existing directory");
   });
 });
+
+describe("integration: cross-source deduplication", () => {
+  /**
+   * These tests verify cross-source deduplication:
+   * When a Linear issue and a GitHub PR are linked (PR mentions Linear ID),
+   * only one session should be created.
+   */
+
+  it("computeDedupKeys extracts Linear refs from GitHub PR", async () => {
+    const { computeDedupKeys } = await import("../../service/poller.js");
+
+    // Simulated GitHub PR that mentions a Linear issue
+    const pr = {
+      id: "https://github.com/myorg/backend/pull/456",
+      number: 456,
+      repository_full_name: "myorg/backend",
+      title: "ENG-123: Implement new feature",
+      body: "This PR implements the feature requested in ENG-123.\n\nCloses #789",
+    };
+
+    const keys = computeDedupKeys(pr);
+
+    // Should include:
+    // 1. PR's own canonical key
+    // 2. Linear issue ref from title
+    // 3. GitHub issue ref from body (relative, needs context)
+    assert.ok(keys.includes("github:myorg/backend#456"), "Should have PR's canonical key");
+    assert.ok(keys.includes("linear:ENG-123"), "Should extract Linear ref from title");
+  });
+
+  it("computeDedupKeys generates canonical key for Linear issues", async () => {
+    const { computeDedupKeys } = await import("../../service/poller.js");
+
+    // Simulated Linear issue (number is the identifier like "ENG-123")
+    const issue = {
+      id: "linear:abc-123-uuid",
+      number: "ENG-123", // Linear preset extracts this from URL
+      title: "Implement new feature",
+      body: "Description of the feature",
+    };
+
+    const keys = computeDedupKeys(issue);
+
+    assert.ok(keys.includes("linear:ENG-123"), "Should have Linear issue's canonical key");
+  });
+
+  it("poller detects duplicate via shared dedup key", async () => {
+    const { createPoller } = await import("../../service/poller.js");
+    const { mkdtempSync, rmSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+
+    const tempDir = mkdtempSync(join(tmpdir(), "dedup-test-"));
+    const stateFile = join(tempDir, "poll-state.json");
+
+    try {
+      const poller = createPoller({ stateFile });
+
+      // Linear issue ENG-123 is processed first
+      poller.markProcessed("linear:abc-uuid", {
+        source: "linear/my-issues",
+        dedupKeys: ["linear:ENG-123"],
+      });
+
+      // GitHub PR comes in with ENG-123 in title
+      const prDedupKeys = ["github:myorg/backend#456", "linear:ENG-123"];
+      
+      // Should find the Linear issue via shared dedup key
+      const existingItemId = poller.findProcessedByDedupKey(prDedupKeys);
+      
+      assert.strictEqual(existingItemId, "linear:abc-uuid", 
+        "PR should be detected as duplicate of Linear issue via shared ENG-123 key");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("dedup key index is rebuilt on load if missing from old state file", async () => {
+    const { createPoller } = await import("../../service/poller.js");
+    const { mkdtempSync, rmSync, writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+
+    const tempDir = mkdtempSync(join(tmpdir(), "dedup-migration-test-"));
+    const stateFile = join(tempDir, "poll-state.json");
+
+    try {
+      // Simulate old state file without dedupKeys index (migration scenario)
+      const oldState = {
+        processed: {
+          "linear:abc-uuid": {
+            processedAt: new Date().toISOString(),
+            source: "linear",
+            dedupKeys: ["linear:ENG-123"], // Keys are in item metadata
+          },
+        },
+        // No dedupKeys index at top level
+        savedAt: new Date().toISOString(),
+      };
+      writeFileSync(stateFile, JSON.stringify(oldState));
+
+      // Load poller - should rebuild index from item metadata
+      const poller = createPoller({ stateFile });
+
+      // Should still be able to find by dedup key
+      const foundId = poller.findProcessedByDedupKey(["linear:ENG-123"]);
+      assert.strictEqual(foundId, "linear:abc-uuid", 
+        "Should rebuild dedup index from processed items on load");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});

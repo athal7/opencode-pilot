@@ -12,7 +12,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { getNestedValue, hasNonBotFeedback } from "./utils.js";
+import { getNestedValue, hasNonBotFeedback, extractIssueRefs } from "./utils.js";
 
 /**
  * Expand template string with item fields
@@ -675,6 +675,49 @@ export function computeAttentionLabels(items, source) {
 }
 
 /**
+ * Compute deduplication keys for an item
+ * 
+ * Dedup keys allow cross-source deduplication: when an issue and its linked PR
+ * both trigger, we can detect they represent the same work.
+ * 
+ * Generates keys from:
+ * 1. The item's own canonical identifier (Linear ID, GitHub repo#number)
+ * 2. Issue references found in title/body (e.g., PR mentioning "Fixes ENG-123")
+ * 
+ * @param {object} item - Item from a source
+ * @param {object} [context] - Context for resolving references
+ * @param {string} [context.repo] - Repository (e.g., "org/repo") for GitHub relative refs
+ * @returns {string[]} Array of dedup keys (e.g., ["linear:ENG-123", "github:org/repo#456"])
+ */
+export function computeDedupKeys(item, context = {}) {
+  const keys = new Set();
+  
+  // 1. Generate canonical key for the item itself
+  
+  // Linear items: use the "number" field which is the issue identifier (e.g., "ENG-123")
+  // Linear preset maps this from url using regex: "url:/([A-Z0-9]+-[0-9]+)/"
+  if (item.number && typeof item.number === 'string' && /^[A-Z][A-Z0-9]*-\d+$/.test(item.number)) {
+    keys.add(`linear:${item.number}`);
+  }
+  
+  // GitHub items: use repo + number
+  // GitHub items have repository.nameWithOwner or repository_full_name (after mapping)
+  const repo = item.repository_full_name || item.repository?.nameWithOwner || context.repo;
+  if (repo && item.number && typeof item.number === 'number') {
+    keys.add(`github:${repo}#${item.number}`);
+  }
+  
+  // 2. Extract issue references from title and body
+  const textToSearch = [item.title, item.body].filter(Boolean).join('\n');
+  const issueRefs = extractIssueRefs(textToSearch, { repo });
+  for (const ref of issueRefs) {
+    keys.add(ref);
+  }
+  
+  return Array.from(keys);
+}
+
+/**
  * Create a poller instance with state tracking
  * 
  * @param {object} options - Poller options
@@ -688,14 +731,32 @@ export function createPoller(options = {}) {
   
   // Load existing state
   let processedItems = new Map();
+  // Dedup key index: maps dedup keys to item IDs for cross-source deduplication
+  let dedupKeyIndex = new Map();
+  
   if (fs.existsSync(stateFile)) {
     try {
       const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
       if (state.processed) {
         processedItems = new Map(Object.entries(state.processed));
       }
+      if (state.dedupKeys) {
+        dedupKeyIndex = new Map(Object.entries(state.dedupKeys));
+      }
     } catch {
       // Start fresh if state is corrupted
+    }
+  }
+  
+  // Rebuild dedup key index from processed items if not in state file
+  // (handles migration from older state files)
+  if (dedupKeyIndex.size === 0 && processedItems.size > 0) {
+    for (const [itemId, meta] of processedItems) {
+      if (meta.dedupKeys && Array.isArray(meta.dedupKeys)) {
+        for (const key of meta.dedupKeys) {
+          dedupKeyIndex.set(key, itemId);
+        }
+      }
     }
   }
   
@@ -706,6 +767,7 @@ export function createPoller(options = {}) {
     }
     const state = {
       processed: Object.fromEntries(processedItems),
+      dedupKeys: Object.fromEntries(dedupKeyIndex),
       savedAt: new Date().toISOString(),
     };
     fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
@@ -720,6 +782,22 @@ export function createPoller(options = {}) {
     },
     
     /**
+     * Check if any of the given dedup keys have been processed
+     * Used for cross-source deduplication (e.g., Linear issue + GitHub PR)
+     * @param {string[]} dedupKeys - Array of dedup keys to check
+     * @returns {string|null} The item ID that owns a matching dedup key, or null
+     */
+    findProcessedByDedupKey(dedupKeys) {
+      for (const key of dedupKeys) {
+        const itemId = dedupKeyIndex.get(key);
+        if (itemId && processedItems.has(itemId)) {
+          return itemId;
+        }
+      }
+      return null;
+    },
+    
+    /**
      * Get metadata for a processed item
      * @param {string} itemId - Item ID
      * @returns {object|null} Metadata or null if not processed
@@ -730,13 +808,26 @@ export function createPoller(options = {}) {
     
     /**
      * Mark an item as processed
+     * @param {string} itemId - Item ID
+     * @param {object} [metadata] - Additional metadata to store
+     * @param {string[]} [metadata.dedupKeys] - Dedup keys for cross-source deduplication
      */
     markProcessed(itemId, metadata = {}) {
-      processedItems.set(itemId, {
+      // Store dedup keys in item metadata
+      const itemMeta = {
         processedAt: new Date().toISOString(),
         lastSeenAt: new Date().toISOString(),
         ...metadata,
-      });
+      };
+      processedItems.set(itemId, itemMeta);
+      
+      // Index dedup keys for fast lookup
+      if (metadata.dedupKeys && Array.isArray(metadata.dedupKeys)) {
+        for (const key of metadata.dedupKeys) {
+          dedupKeyIndex.set(key, itemId);
+        }
+      }
+      
       saveState();
     },
     
@@ -814,8 +905,16 @@ export function createPoller(options = {}) {
     
     /**
      * Clear a specific item from processed state
+     * Also removes its dedup keys from the index
      */
     clearProcessed(itemId) {
+      // Remove dedup keys from index first
+      const meta = processedItems.get(itemId);
+      if (meta && meta.dedupKeys && Array.isArray(meta.dedupKeys)) {
+        for (const key of meta.dedupKeys) {
+          dedupKeyIndex.delete(key);
+        }
+      }
       processedItems.delete(itemId);
       saveState();
     },
@@ -825,6 +924,7 @@ export function createPoller(options = {}) {
      */
     clearState() {
       processedItems.clear();
+      dedupKeyIndex.clear();
       saveState();
     },
     
@@ -851,6 +951,7 @@ export function createPoller(options = {}) {
     
     /**
      * Clear all entries for a specific source
+     * Also removes associated dedup keys from the index
      * @param {string} sourceName - Source name
      * @returns {number} Number of entries removed
      */
@@ -858,6 +959,12 @@ export function createPoller(options = {}) {
       let removed = 0;
       for (const [id, meta] of processedItems) {
         if (meta.source === sourceName) {
+          // Remove dedup keys from index
+          if (meta.dedupKeys && Array.isArray(meta.dedupKeys)) {
+            for (const key of meta.dedupKeys) {
+              dedupKeyIndex.delete(key);
+            }
+          }
           processedItems.delete(id);
           removed++;
         }
@@ -868,6 +975,7 @@ export function createPoller(options = {}) {
     
     /**
      * Remove entries older than ttlDays
+     * Also removes associated dedup keys from the index
      * @param {number} [ttlDays=30] - Days before expiration
      * @returns {number} Number of entries removed
      */
@@ -877,6 +985,12 @@ export function createPoller(options = {}) {
       for (const [id, meta] of processedItems) {
         const processedAt = new Date(meta.processedAt).getTime();
         if (processedAt < cutoffMs) {
+          // Remove dedup keys from index
+          if (meta.dedupKeys && Array.isArray(meta.dedupKeys)) {
+            for (const key of meta.dedupKeys) {
+              dedupKeyIndex.delete(key);
+            }
+          }
           processedItems.delete(id);
           removed++;
         }
@@ -888,6 +1002,7 @@ export function createPoller(options = {}) {
     /**
      * Remove entries for a source that are no longer in current items
      * Only removes entries older than minAgeDays to avoid race conditions
+     * Also removes associated dedup keys from the index
      * @param {string} sourceName - Source name to clean
      * @param {string[]} currentItemIds - Current item IDs from source
      * @param {number} [minAgeDays=1] - Minimum age before cleanup (0 = immediate)
@@ -903,6 +1018,12 @@ export function createPoller(options = {}) {
           const processedAt = new Date(meta.processedAt).getTime();
           // Use <= to allow immediate cleanup when minAgeDays=0
           if (processedAt <= cutoffTimestamp) {
+            // Remove dedup keys from index
+            if (meta.dedupKeys && Array.isArray(meta.dedupKeys)) {
+              for (const key of meta.dedupKeys) {
+                dedupKeyIndex.delete(key);
+              }
+            }
             processedItems.delete(id);
             removed++;
           }

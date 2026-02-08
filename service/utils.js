@@ -110,6 +110,60 @@ export function isReply(feedback) {
 }
 
 /**
+ * Extract issue references from text (PR title, body, etc.)
+ * 
+ * Used for cross-source deduplication: when a PR references an issue,
+ * both should be treated as the same work item.
+ * 
+ * Supported patterns:
+ * - Linear issues: ENG-123, PROJ-456 (uppercase prefix, hyphen, numbers)
+ * - GitHub issues: #123, org/repo#123, Fixes #123, Closes org/repo#456
+ * 
+ * @param {string} text - Text to extract references from
+ * @param {object} [context] - Optional context for resolving relative refs
+ * @param {string} [context.repo] - Repository (e.g., "org/repo") for resolving #123
+ * @returns {string[]} Array of normalized issue references (e.g., ["linear:ENG-123", "github:org/repo#123"])
+ */
+export function extractIssueRefs(text, context = {}) {
+  if (!text || typeof text !== 'string') {
+    return [];
+  }
+  
+  const refs = new Set();
+  
+  // Linear issue pattern: ENG-123, PROJ-456 (1-10 char uppercase prefix)
+  // Must be word-bounded to avoid matching random strings
+  const linearPattern = /\b([A-Z][A-Z0-9]{0,9}-\d+)\b/g;
+  let match;
+  while ((match = linearPattern.exec(text)) !== null) {
+    refs.add(`linear:${match[1]}`);
+  }
+  
+  // GitHub issue patterns:
+  // - Full: org/repo#123
+  // - Relative: #123 (needs context.repo)
+  // - Keywords: Fixes #123, Closes org/repo#456, Resolves #789
+  
+  // Full repo reference: org/repo#123
+  const fullGithubPattern = /\b([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)#(\d+)\b/g;
+  while ((match = fullGithubPattern.exec(text)) !== null) {
+    refs.add(`github:${match[1]}#${match[2]}`);
+  }
+  
+  // Relative reference: #123 (only if context.repo is provided)
+  if (context.repo) {
+    // Match #123 but not org/repo#123 (already handled above)
+    // Use negative lookbehind to avoid matching the # in full refs
+    const relativePattern = /(?<![a-zA-Z0-9_.-]\/[a-zA-Z0-9_.-]+)#(\d+)\b/g;
+    while ((match = relativePattern.exec(text)) !== null) {
+      refs.add(`github:${context.repo}#${match[1]}`);
+    }
+  }
+  
+  return Array.from(refs);
+}
+
+/**
  * Check if a PR/issue has actionable feedback
  * 
  * Used to filter out PRs where only bots have commented, since those don't

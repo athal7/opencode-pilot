@@ -374,6 +374,193 @@ describe('poller.js', () => {
     });
   });
 
+  describe('cross-source deduplication', () => {
+    test('findProcessedByDedupKey finds item by dedup key', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('linear:abc123', { 
+        source: 'linear',
+        dedupKeys: ['linear:ENG-123'],
+      });
+      
+      // Should find the item by its dedup key
+      const foundId = poller.findProcessedByDedupKey(['linear:ENG-123']);
+      assert.strictEqual(foundId, 'linear:abc123');
+    });
+
+    test('findProcessedByDedupKey returns null when no match', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('linear:abc123', { 
+        source: 'linear',
+        dedupKeys: ['linear:ENG-123'],
+      });
+      
+      // Different dedup key should not match
+      const foundId = poller.findProcessedByDedupKey(['linear:ENG-456']);
+      assert.strictEqual(foundId, null);
+    });
+
+    test('findProcessedByDedupKey enables cross-source dedup (Linear + GitHub PR)', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      
+      // Linear issue ENG-123 is processed first
+      poller.markProcessed('linear:abc123', { 
+        source: 'linear/my-issues',
+        dedupKeys: ['linear:ENG-123'],
+      });
+      
+      // GitHub PR mentioning ENG-123 comes later - should find the Linear item
+      const prDedupKeys = ['github:myorg/backend#456', 'linear:ENG-123']; // PR has ENG-123 in title
+      const foundId = poller.findProcessedByDedupKey(prDedupKeys);
+      
+      assert.strictEqual(foundId, 'linear:abc123', 'PR should match Linear issue by shared dedup key');
+    });
+
+    test('dedup key index persists across poller instances', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller1 = createPoller({ stateFile });
+      poller1.markProcessed('linear:abc123', { 
+        source: 'linear',
+        dedupKeys: ['linear:ENG-123'],
+      });
+      
+      // New poller instance should have the dedup index
+      const poller2 = createPoller({ stateFile });
+      const foundId = poller2.findProcessedByDedupKey(['linear:ENG-123']);
+      assert.strictEqual(foundId, 'linear:abc123');
+    });
+
+    test('clearProcessed removes dedup keys from index', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('linear:abc123', { 
+        source: 'linear',
+        dedupKeys: ['linear:ENG-123'],
+      });
+      
+      // Verify it's there
+      assert.strictEqual(poller.findProcessedByDedupKey(['linear:ENG-123']), 'linear:abc123');
+      
+      // Clear the item
+      poller.clearProcessed('linear:abc123');
+      
+      // Dedup key should be gone
+      assert.strictEqual(poller.findProcessedByDedupKey(['linear:ENG-123']), null);
+    });
+
+    test('clearState removes all dedup keys', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('item-1', { dedupKeys: ['key-1', 'key-2'] });
+      poller.markProcessed('item-2', { dedupKeys: ['key-3'] });
+      
+      poller.clearState();
+      
+      assert.strictEqual(poller.findProcessedByDedupKey(['key-1']), null);
+      assert.strictEqual(poller.findProcessedByDedupKey(['key-2']), null);
+      assert.strictEqual(poller.findProcessedByDedupKey(['key-3']), null);
+    });
+
+    test('clearBySource removes dedup keys for that source only', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('item-1', { source: 'linear', dedupKeys: ['linear:ENG-123'] });
+      poller.markProcessed('item-2', { source: 'github', dedupKeys: ['github:org/repo#456'] });
+      
+      poller.clearBySource('linear');
+      
+      // Linear dedup key should be gone
+      assert.strictEqual(poller.findProcessedByDedupKey(['linear:ENG-123']), null);
+      // GitHub dedup key should still exist
+      assert.strictEqual(poller.findProcessedByDedupKey(['github:org/repo#456']), 'item-2');
+    });
+  });
+
+  describe('computeDedupKeys', () => {
+    test('generates Linear dedup key from number field', async () => {
+      const { computeDedupKeys } = await import('../../service/poller.js');
+      
+      // Linear item with number field (extracted from URL by preset mapping)
+      const item = {
+        id: 'abc-123-uuid',
+        number: 'ENG-123',
+        title: 'Fix the bug',
+      };
+      
+      const keys = computeDedupKeys(item);
+      assert.ok(keys.includes('linear:ENG-123'));
+    });
+
+    test('generates GitHub dedup key from repo + number', async () => {
+      const { computeDedupKeys } = await import('../../service/poller.js');
+      
+      const item = {
+        id: 'https://github.com/myorg/backend/issues/123',
+        number: 123,
+        repository_full_name: 'myorg/backend',
+        title: 'Fix the bug',
+      };
+      
+      const keys = computeDedupKeys(item);
+      assert.ok(keys.includes('github:myorg/backend#123'));
+    });
+
+    test('extracts Linear refs from PR title/body', async () => {
+      const { computeDedupKeys } = await import('../../service/poller.js');
+      
+      const item = {
+        id: 'https://github.com/myorg/backend/pull/456',
+        number: 456,
+        repository_full_name: 'myorg/backend',
+        title: 'ENG-123: Fix the bug',
+        body: 'This PR fixes the issue described in ENG-123.',
+      };
+      
+      const keys = computeDedupKeys(item);
+      // Should have both the PR's own key and the Linear ref
+      assert.ok(keys.includes('github:myorg/backend#456'), 'Should have PR key');
+      assert.ok(keys.includes('linear:ENG-123'), 'Should extract Linear ref from title/body');
+    });
+
+    test('extracts GitHub issue refs from PR body', async () => {
+      const { computeDedupKeys } = await import('../../service/poller.js');
+      
+      const item = {
+        id: 'https://github.com/myorg/backend/pull/456',
+        number: 456,
+        repository_full_name: 'myorg/backend',
+        title: 'Fix the bug',
+        body: 'Fixes #123',
+      };
+      
+      const keys = computeDedupKeys(item, { repo: 'myorg/backend' });
+      assert.ok(keys.includes('github:myorg/backend#456'), 'Should have PR key');
+      assert.ok(keys.includes('github:myorg/backend#123'), 'Should extract issue ref from body');
+    });
+
+    test('handles items without extractable refs', async () => {
+      const { computeDedupKeys } = await import('../../service/poller.js');
+      
+      const item = {
+        id: 'reminder:abc123',
+        title: 'Buy groceries',
+      };
+      
+      const keys = computeDedupKeys(item);
+      // Should return empty array - no recognizable refs
+      assert.deepStrictEqual(keys, []);
+    });
+  });
+
   describe('status tracking', () => {
     test('shouldReprocess returns false for item with same state', async () => {
       const { createPoller } = await import('../../service/poller.js');

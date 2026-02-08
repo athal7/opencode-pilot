@@ -290,6 +290,114 @@ describe('utils.js', () => {
     });
   });
 
+  describe('extractIssueRefs', () => {
+    test('extracts Linear issue IDs from text', async () => {
+      const { extractIssueRefs } = await import('../../service/utils.js');
+      
+      assert.deepStrictEqual(
+        extractIssueRefs('Fix bug in ENG-123'),
+        ['linear:ENG-123']
+      );
+      assert.deepStrictEqual(
+        extractIssueRefs('Implement PROJ-456 feature'),
+        ['linear:PROJ-456']
+      );
+    });
+
+    test('extracts multiple Linear IDs', async () => {
+      const { extractIssueRefs } = await import('../../service/utils.js');
+      
+      const refs = extractIssueRefs('Fixes ENG-123 and also addresses ENG-456');
+      assert.ok(refs.includes('linear:ENG-123'));
+      assert.ok(refs.includes('linear:ENG-456'));
+      assert.strictEqual(refs.length, 2);
+    });
+
+    test('extracts full GitHub issue references', async () => {
+      const { extractIssueRefs } = await import('../../service/utils.js');
+      
+      assert.deepStrictEqual(
+        extractIssueRefs('Fixes myorg/backend#123'),
+        ['github:myorg/backend#123']
+      );
+    });
+
+    test('extracts relative GitHub issue references with context', async () => {
+      const { extractIssueRefs } = await import('../../service/utils.js');
+      
+      const refs = extractIssueRefs('Fixes #123', { repo: 'myorg/backend' });
+      assert.deepStrictEqual(refs, ['github:myorg/backend#123']);
+    });
+
+    test('ignores relative GitHub refs without context', async () => {
+      const { extractIssueRefs } = await import('../../service/utils.js');
+      
+      // Without context.repo, relative refs like #123 cannot be resolved
+      const refs = extractIssueRefs('Fixes #123');
+      assert.deepStrictEqual(refs, []);
+    });
+
+    test('extracts mixed Linear and GitHub refs', async () => {
+      const { extractIssueRefs } = await import('../../service/utils.js');
+      
+      const refs = extractIssueRefs('Fixes ENG-123 and closes myorg/backend#456');
+      assert.ok(refs.includes('linear:ENG-123'));
+      assert.ok(refs.includes('github:myorg/backend#456'));
+      assert.strictEqual(refs.length, 2);
+    });
+
+    test('deduplicates repeated references', async () => {
+      const { extractIssueRefs } = await import('../../service/utils.js');
+      
+      const refs = extractIssueRefs('ENG-123 mentioned again ENG-123');
+      assert.deepStrictEqual(refs, ['linear:ENG-123']);
+    });
+
+    test('handles typical PR body with closing keywords', async () => {
+      const { extractIssueRefs } = await import('../../service/utils.js');
+      
+      const prBody = `## Summary
+      This PR implements the feature requested in ENG-123.
+      
+      Closes #456
+      `;
+      
+      const refs = extractIssueRefs(prBody, { repo: 'myorg/backend' });
+      assert.ok(refs.includes('linear:ENG-123'));
+      assert.ok(refs.includes('github:myorg/backend#456'));
+    });
+
+    test('handles empty/null/undefined input', async () => {
+      const { extractIssueRefs } = await import('../../service/utils.js');
+      
+      assert.deepStrictEqual(extractIssueRefs(''), []);
+      assert.deepStrictEqual(extractIssueRefs(null), []);
+      assert.deepStrictEqual(extractIssueRefs(undefined), []);
+    });
+
+    test('does not match partial patterns', async () => {
+      const { extractIssueRefs } = await import('../../service/utils.js');
+      
+      // Should not match: lowercase, no hyphen
+      assert.deepStrictEqual(extractIssueRefs('eng-123'), []); // lowercase
+      assert.deepStrictEqual(extractIssueRefs('ENG123'), []); // no hyphen
+      // Underscores are word characters, so \b won't match - ENG-123 inside underscores won't be extracted
+      assert.deepStrictEqual(extractIssueRefs('PREFIX_ENG-123_SUFFIX'), []); // underscores prevent word boundary
+      // But spaces, parentheses, etc. are fine
+      assert.deepStrictEqual(extractIssueRefs('(ENG-123)'), ['linear:ENG-123']);
+      assert.deepStrictEqual(extractIssueRefs('See ENG-123 for details'), ['linear:ENG-123']);
+    });
+
+    test('handles various Linear team prefixes', async () => {
+      const { extractIssueRefs } = await import('../../service/utils.js');
+      
+      // Various real-world team prefix patterns
+      assert.deepStrictEqual(extractIssueRefs('A-1'), ['linear:A-1']); // shortest
+      assert.deepStrictEqual(extractIssueRefs('PLATFORM-99999'), ['linear:PLATFORM-99999']); // longer
+      assert.deepStrictEqual(extractIssueRefs('DEV2-123'), ['linear:DEV2-123']); // with numbers
+    });
+  });
+
   describe('getNestedValue', () => {
     test('gets top-level value', async () => {
       const { getNestedValue } = await import('../../service/utils.js');
