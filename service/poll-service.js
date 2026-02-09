@@ -10,7 +10,7 @@
  */
 
 import { loadRepoConfig, getRepoConfig, getAllSources, getToolProviderConfig, resolveRepoForItem, getCleanupTtlDays, getStartupDelay } from "./repo-config.js";
-import { createPoller, pollGenericSource, enrichItemsWithComments, enrichItemsWithMergeable, computeAttentionLabels, computeDedupKeys } from "./poller.js";
+import { createPoller, pollGenericSource, enrichItemsWithComments, enrichItemsWithMergeable, enrichItemsWithBranchRefs, computeAttentionLabels, computeDedupKeys, detectStacks } from "./poller.js";
 import { evaluateReadiness, sortByPriority } from "./readiness.js";
 import { executeAction, buildCommand } from "./actions.js";
 import { debug } from "./logger.js";
@@ -146,6 +146,12 @@ export async function pollOnce(options = {}) {
           debug(`Enriched ${items.length} items with mergeable status`);
         }
         
+        // Enrich items with branch refs for stack detection if configured
+        if (source.detect_stacks) {
+          items = await enrichItemsWithBranchRefs(items, source);
+          debug(`Enriched ${items.length} items with branch refs for stack detection`);
+        }
+        
         // Compute attention labels if both enrichments are present (for my-prs-attention)
         if (source.enrich_mergeable && source.filter_bot_comments) {
           items = computeAttentionLabels(items, source);
@@ -192,6 +198,12 @@ export async function pollOnce(options = {}) {
     // Sort by priority (use first item's repo config or empty)
     const sortConfig = readyItems.length > 0 ? readyItems[0]._repoConfig : {};
     const sortedItems = sortByPriority(readyItems, sortConfig);
+
+    // Detect PR stacks for session reuse (only when detect_stacks is enabled)
+    const stackMap = source.detect_stacks ? detectStacks(sortedItems) : new Map();
+    if (stackMap.size > 0) {
+      debug(`Detected ${stackMap.size} items in PR stacks`);
+    }
 
     // Process ready items
     // Get reprocess_on config: source-level overrides provider-level
@@ -241,6 +253,21 @@ export async function pollOnce(options = {}) {
         debug(`Reusing existing directory: ${existingDirectory}`);
       }
 
+      // Check if a stack sibling was already processed (for session reuse across stacked PRs)
+      if (stackMap.has(item.id) && pollerInstance) {
+        const siblings = stackMap.get(item.id);
+        for (const siblingId of siblings) {
+          const siblingMeta = pollerInstance.getProcessedMeta(siblingId);
+          if (siblingMeta?.sessionId && siblingMeta?.directory) {
+            actionConfig.existing_directory = siblingMeta.directory;
+            actionConfig.reuse_stack_session = siblingMeta.sessionId;
+            debug(`Stack reuse: ${item.id} reusing session ${siblingMeta.sessionId} from sibling ${siblingId}`);
+            console.log(`[poll] Stack reuse: ${item.id} reusing session from stack sibling ${siblingId}`);
+            break;
+          }
+        }
+      }
+
       // Skip items with no valid local path (prevents sessions in home directory)
       const hasLocalPath = actionConfig.working_dir || actionConfig.path || actionConfig.repo_path;
       if (!hasLocalPath) {
@@ -277,6 +304,7 @@ export async function pollOnce(options = {}) {
                 command: result.command,
                 source: sourceName,
                 directory: result.directory || null,
+                sessionId: result.sessionId || null,
                 itemState: item.state || item.status || null,
                 itemUpdatedAt: item.updated_at || null,
                 dedupKeys: dedupKeys.length > 0 ? dedupKeys : undefined,

@@ -733,3 +733,177 @@ describe("integration: cross-source deduplication", () => {
     }
   });
 });
+
+describe("integration: stacked PR session reuse", () => {
+  let mockServer;
+
+  afterEach(async () => {
+    if (mockServer) {
+      await mockServer.close();
+      mockServer = null;
+    }
+  });
+
+  it("reuses stack sibling's session when reuse_stack_session is set", async () => {
+    let sessionCreated = false;
+    let messageSessionId = null;
+    let messageTitleUpdated = null;
+
+    mockServer = await createMockServer({
+      "GET /session": () => ({
+        // Return the stack sibling's session
+        body: [{ id: "ses_stack_sibling", directory: "/wt/pr-101", time: { created: 1000, updated: 2000 } }],
+      }),
+      "GET /session/status": () => ({ body: {} }),
+      "POST /session": () => {
+        sessionCreated = true;
+        return { body: { id: "ses_new" } };
+      },
+      "PATCH /session/ses_stack_sibling": (req) => {
+        messageTitleUpdated = req.body?.title;
+        return { body: {} };
+      },
+      "POST /session/ses_stack_sibling/message": (req) => {
+        messageSessionId = "ses_stack_sibling";
+        return { body: { success: true } };
+      },
+      "GET /project/current": () => ({
+        body: { id: "proj_1", worktree: "/proj", time: { created: 1000, updated: 2000 }, sandboxes: [] },
+      }),
+    });
+
+    const result = await executeAction(
+      { number: 102, title: "Part 2 of feature" },
+      {
+        path: "/proj",
+        prompt: "default",
+        // These are set by poll-service when a stack sibling is found
+        existing_directory: "/wt/pr-101",
+        reuse_stack_session: "ses_stack_sibling",
+      },
+      { discoverServer: async () => mockServer.url }
+    );
+
+    assert.ok(result.success, "Action should succeed");
+    assert.strictEqual(result.sessionReused, true, "Should indicate session was reused");
+    assert.strictEqual(sessionCreated, false, "Should NOT create new session");
+    assert.strictEqual(messageSessionId, "ses_stack_sibling", "Should post to stack sibling's session");
+  });
+
+  it("falls back to normal flow when stack session is gone", async () => {
+    let sessionCreated = false;
+    let newSessionMessageId = null;
+
+    mockServer = await createMockServer({
+      "GET /session": () => ({
+        // No sessions exist (sibling's session was archived/gone)
+        body: [],
+      }),
+      "GET /session/status": () => ({ body: {} }),
+      // Stack session reuse will try this and fail
+      "PATCH /session/ses_gone": () => ({
+        status: 404,
+        body: { error: "Session not found" },
+      }),
+      "POST /session/ses_gone/message": () => ({
+        status: 404,
+        body: { error: "Session not found" },
+      }),
+      // Falls through to creating a new session
+      "POST /session": () => {
+        sessionCreated = true;
+        return { body: { id: "ses_new_fallback" } };
+      },
+      "PATCH /session/ses_new_fallback": () => ({ body: {} }),
+      "POST /session/ses_new_fallback/message": (req) => {
+        newSessionMessageId = "ses_new_fallback";
+        return { body: { success: true } };
+      },
+      "GET /project/current": () => ({
+        body: { id: "proj_1", worktree: "/proj", time: { created: 1000, updated: 2000 }, sandboxes: [] },
+      }),
+    });
+
+    const result = await executeAction(
+      { number: 102, title: "Part 2 of feature" },
+      {
+        path: "/proj",
+        prompt: "default",
+        existing_directory: "/wt/pr-101",
+        reuse_stack_session: "ses_gone",
+      },
+      { discoverServer: async () => mockServer.url }
+    );
+
+    assert.ok(result.success, "Action should succeed via fallback");
+    assert.ok(sessionCreated, "Should create new session when stack session is gone");
+  });
+
+  it("detectStacks + poller metadata enables stack reuse across poll cycles", async () => {
+    // This test verifies the full flow:
+    // 1. PR #101 was processed in a previous poll cycle (has sessionId + directory in metadata)
+    // 2. PR #102 is in the same stack (detected via detectStacks)
+    // 3. poll-service should set reuse_stack_session from sibling metadata
+
+    const { createPoller, detectStacks } = await import("../../service/poller.js");
+    const { mkdtempSync, rmSync: rmSyncFs } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+
+    const tempDir = mkdtempSync(join(tmpdir(), "stack-reuse-test-"));
+    const stateFile = join(tempDir, "poll-state.json");
+
+    try {
+      const poller = createPoller({ stateFile });
+
+      // Simulate: PR #101 was processed in a previous poll cycle
+      poller.markProcessed("https://github.com/myorg/app/pull/101", {
+        source: "review-requests",
+        directory: "/wt/pr-101",
+        sessionId: "ses_pr101",
+      });
+
+      // Current poll returns both PRs with branch refs
+      const items = [
+        {
+          id: "https://github.com/myorg/app/pull/101",
+          number: 101,
+          repository_full_name: "myorg/app",
+          _baseRefName: "main",
+          _headRefName: "feature-part-1",
+        },
+        {
+          id: "https://github.com/myorg/app/pull/102",
+          number: 102,
+          repository_full_name: "myorg/app",
+          _baseRefName: "feature-part-1",
+          _headRefName: "feature-part-2",
+        },
+      ];
+
+      // Detect stacks
+      const stackMap = detectStacks(items);
+
+      assert.ok(stackMap.has(items[1].id), "PR #102 should be in a stack");
+
+      // Simulate what poll-service does: look up sibling metadata
+      const siblings = stackMap.get(items[1].id);
+      let foundSessionId = null;
+      let foundDirectory = null;
+
+      for (const siblingId of siblings) {
+        const meta = poller.getProcessedMeta(siblingId);
+        if (meta?.sessionId && meta?.directory) {
+          foundSessionId = meta.sessionId;
+          foundDirectory = meta.directory;
+          break;
+        }
+      }
+
+      assert.strictEqual(foundSessionId, "ses_pr101", "Should find PR #101's session ID");
+      assert.strictEqual(foundDirectory, "/wt/pr-101", "Should find PR #101's directory");
+    } finally {
+      rmSyncFs(tempDir, { recursive: true, force: true });
+    }
+  });
+});

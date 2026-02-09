@@ -819,6 +819,37 @@ async function executeInDirectory(serverUrl, cwd, item, config, options = {}) {
     ? buildSessionName(config.session.name, item)
     : (item.title || `session-${Date.now()}`);
   
+  // Check if we should reuse a stack sibling's session
+  // This is set when another PR in the same stack was already processed
+  if (config.reuse_stack_session && !options.dryRun) {
+    try {
+      debug(`executeInDirectory: trying stack session reuse ${config.reuse_stack_session} for ${cwd}`);
+      
+      const stackResult = await sendMessageToSession(serverUrl, config.reuse_stack_session, cwd, prompt, {
+        title: sessionTitle,
+        agent: config.agent,
+        model: config.model,
+        fetch: options.fetch,
+      });
+      
+      if (stackResult.success) {
+        const stackCommand = `[API] POST ${serverUrl}/session/${config.reuse_stack_session}/message (stack reuse)`;
+        return {
+          command: stackCommand,
+          success: true,
+          sessionId: stackResult.sessionId,
+          directory: cwd,
+          sessionReused: true,
+          error: stackResult.error,
+        };
+      }
+      
+      debug(`executeInDirectory: stack session reuse failed, falling through`);
+    } catch (err) {
+      debug(`executeInDirectory: stack session reuse error, falling through: ${err.message}`);
+    }
+  }
+  
   // Check if we should try to reuse an existing session
   const reuseActiveSession = config.reuse_active_session !== false; // default true
   

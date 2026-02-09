@@ -35,6 +35,8 @@ sources:
   - preset: github/my-issues
     prompt: worktree
 
+  # PR presets have detect_stacks: true by default, enabling session reuse
+  # across stacked PRs (where one PR's head branch = another's base branch)
   - preset: github/review-requests
     # Per-source model override (takes precedence over defaults.model)
     # model: anthropic/claude-haiku-3.5

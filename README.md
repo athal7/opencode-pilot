@@ -140,6 +140,18 @@ sources:
 - `worktree_name` - Template for naming new worktrees (only with `worktree: "new"`)
 - `prefer_existing_sandbox: false` - Disable sandbox reuse for this source
 
+### Stacked PR Support
+
+When `detect_stacks: true` is set on a source, pilot detects stacked PRs (where one PR's head branch is another PR's base branch) and reuses the existing session from a stack sibling. This gives the agent full context about the entire stack without redundant context-gathering.
+
+```yaml
+sources:
+  - preset: github/review-requests
+    detect_stacks: true  # Enabled by default in this preset
+```
+
+The `github/review-requests` and `github/my-prs-attention` presets enable stack detection by default.
+
 ## CLI Commands
 
 ```bash

@@ -39,6 +39,8 @@ review-requests:
   worktree_name: "pr-{number}"
   session:
     name: "Review: {title}"
+  # Detect stacked PRs and reuse sessions across the stack
+  detect_stacks: true
 
 my-prs-attention:
   name: my-prs-attention
@@ -56,6 +58,8 @@ my-prs-attention:
   # Enrich with both mergeable status and comments to detect all attention conditions
   enrich_mergeable: true
   filter_bot_comments: true
+  # Detect stacked PRs and reuse sessions across the stack
+  detect_stacks: true
   readiness:
     # Require at least one attention condition (conflicts or human feedback)
     require_attention: true
