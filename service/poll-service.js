@@ -307,6 +307,9 @@ export async function pollOnce(options = {}) {
                 sessionId: result.sessionId || null,
                 itemState: item.state || item.status || null,
                 itemUpdatedAt: item.updated_at || null,
+                // Store attention state for detecting new feedback on PRs
+                // _has_attention is boolean for enriched items, undefined for non-PR sources
+                hasAttention: item._has_attention ?? null,
                 dedupKeys: dedupKeys.length > 0 ? dedupKeys : undefined,
               });
             }

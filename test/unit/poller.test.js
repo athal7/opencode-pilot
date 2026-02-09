@@ -792,6 +792,126 @@ describe('poller.js', () => {
       // Poll 3: item-2 reappears - wasUnseen flag should still be true until cleared
       // (The flag gets cleared when shouldReprocess triggers reprocessing)
     });
+
+    test('shouldReprocess returns true when attention changes from false to true', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      // Item was processed without attention (no feedback)
+      poller.markProcessed('pr-1', { 
+        source: 'my-prs-attention', 
+        itemState: 'open',
+        hasAttention: false
+      });
+      
+      // Item now has attention (received feedback)
+      const item = { id: 'pr-1', state: 'open', _has_attention: true };
+      assert.strictEqual(
+        poller.shouldReprocess(item, { reprocessOn: ['attention'] }), 
+        true,
+        'Should reprocess when attention changes false -> true'
+      );
+    });
+
+    test('shouldReprocess returns false when attention stays true', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      // Item was processed with attention
+      poller.markProcessed('pr-1', { 
+        source: 'my-prs-attention', 
+        itemState: 'open',
+        hasAttention: true
+      });
+      
+      // Item still has attention
+      const item = { id: 'pr-1', state: 'open', _has_attention: true };
+      assert.strictEqual(
+        poller.shouldReprocess(item, { reprocessOn: ['attention'] }), 
+        false,
+        'Should NOT reprocess when attention stays true'
+      );
+    });
+
+    test('shouldReprocess returns false when attention stays false', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      // Item was processed without attention
+      poller.markProcessed('pr-1', { 
+        source: 'my-prs-attention', 
+        itemState: 'open',
+        hasAttention: false
+      });
+      
+      // Item still has no attention
+      const item = { id: 'pr-1', state: 'open', _has_attention: false };
+      assert.strictEqual(
+        poller.shouldReprocess(item, { reprocessOn: ['attention'] }), 
+        false,
+        'Should NOT reprocess when attention stays false'
+      );
+    });
+
+    test('shouldReprocess returns false when attention changes from true to false', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      // Item was processed with attention
+      poller.markProcessed('pr-1', { 
+        source: 'my-prs-attention', 
+        itemState: 'open',
+        hasAttention: true
+      });
+      
+      // Attention was addressed (no longer needs attention)
+      const item = { id: 'pr-1', state: 'open', _has_attention: false };
+      assert.strictEqual(
+        poller.shouldReprocess(item, { reprocessOn: ['attention'] }), 
+        false,
+        'Should NOT reprocess when attention changes true -> false'
+      );
+    });
+
+    test('shouldReprocess handles attention with no stored hasAttention (legacy)', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      // Legacy item without hasAttention stored
+      poller.markProcessed('pr-1', { 
+        source: 'my-prs-attention', 
+        itemState: 'open'
+        // Note: no hasAttention
+      });
+      
+      // Item now has attention
+      const item = { id: 'pr-1', state: 'open', _has_attention: true };
+      // Should NOT reprocess - we don't know previous state, assume it was handled
+      assert.strictEqual(
+        poller.shouldReprocess(item, { reprocessOn: ['attention'] }), 
+        false,
+        'Should NOT reprocess legacy items without stored hasAttention'
+      );
+    });
+
+    test('shouldReprocess handles attention combined with state changes', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('pr-1', { 
+        source: 'my-prs-attention', 
+        itemState: 'closed',  // Was closed
+        hasAttention: false
+      });
+      
+      // Reopened but no attention - state change should trigger
+      const item = { id: 'pr-1', state: 'open', _has_attention: false };
+      assert.strictEqual(
+        poller.shouldReprocess(item, { reprocessOn: ['state', 'attention'] }), 
+        true,
+        'Should reprocess when state changes even if attention unchanged'
+      );
+    });
   });
 
   describe('pollGenericSource', () => {

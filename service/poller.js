@@ -1251,6 +1251,18 @@ export function createPoller(options = {}) {
             }
           }
         }
+        
+        // Handle attention field (detect new feedback on PRs)
+        // Only reprocess when attention changes from false to true
+        if (field === 'attention') {
+          const storedHasAttention = meta.hasAttention;
+          const currentHasAttention = item._has_attention;
+          
+          // Only trigger if we have stored state (not legacy items) and attention changed false -> true
+          if (storedHasAttention === false && currentHasAttention === true) {
+            return true;
+          }
+        }
       }
       
       return false;

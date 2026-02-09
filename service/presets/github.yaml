@@ -63,7 +63,8 @@ my-prs-attention:
   readiness:
     # Require at least one attention condition (conflicts or human feedback)
     require_attention: true
-  # Only reprocess when state changes (e.g., reopened)
+  # Reprocess when state changes (reopened) or new feedback received
   # Note: updatedAt is NOT included - CI status changes would trigger reprocessing
   reprocess_on:
     - state
+    - attention
