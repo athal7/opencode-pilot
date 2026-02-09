@@ -1438,4 +1438,261 @@ describe('poller.js', () => {
       assert.deepStrictEqual(result, []);
     });
   });
+
+  describe('detectStacks', () => {
+    test('detects a simple 2-PR stack', async () => {
+      const { detectStacks } = await import('../../service/poller.js');
+
+      const items = [
+        {
+          id: 'https://github.com/myorg/app/pull/101',
+          number: 101,
+          repository_full_name: 'myorg/app',
+          _baseRefName: 'main',
+          _headRefName: 'feature-part-1',
+        },
+        {
+          id: 'https://github.com/myorg/app/pull/102',
+          number: 102,
+          repository_full_name: 'myorg/app',
+          _baseRefName: 'feature-part-1',
+          _headRefName: 'feature-part-2',
+        },
+      ];
+
+      const stacks = detectStacks(items);
+
+      // Both PRs should be in the map as siblings of each other
+      assert.ok(stacks.has(items[0].id), 'PR #101 should be in stacks map');
+      assert.ok(stacks.has(items[1].id), 'PR #102 should be in stacks map');
+      assert.deepStrictEqual(stacks.get(items[0].id), [items[1].id]);
+      assert.deepStrictEqual(stacks.get(items[1].id), [items[0].id]);
+    });
+
+    test('detects a 3-PR chain', async () => {
+      const { detectStacks } = await import('../../service/poller.js');
+
+      const items = [
+        {
+          id: 'https://github.com/myorg/app/pull/101',
+          number: 101,
+          repository_full_name: 'myorg/app',
+          _baseRefName: 'main',
+          _headRefName: 'feature-part-1',
+        },
+        {
+          id: 'https://github.com/myorg/app/pull/102',
+          number: 102,
+          repository_full_name: 'myorg/app',
+          _baseRefName: 'feature-part-1',
+          _headRefName: 'feature-part-2',
+        },
+        {
+          id: 'https://github.com/myorg/app/pull/103',
+          number: 103,
+          repository_full_name: 'myorg/app',
+          _baseRefName: 'feature-part-2',
+          _headRefName: 'feature-part-3',
+        },
+      ];
+
+      const stacks = detectStacks(items);
+
+      // All three should be siblings of each other
+      assert.ok(stacks.has(items[0].id));
+      assert.ok(stacks.has(items[1].id));
+      assert.ok(stacks.has(items[2].id));
+
+      // PR #101 should have #102 and #103 as siblings
+      const siblings101 = stacks.get(items[0].id);
+      assert.ok(siblings101.includes(items[1].id));
+      assert.ok(siblings101.includes(items[2].id));
+      assert.strictEqual(siblings101.length, 2);
+
+      // PR #102 should have #101 and #103 as siblings
+      const siblings102 = stacks.get(items[1].id);
+      assert.ok(siblings102.includes(items[0].id));
+      assert.ok(siblings102.includes(items[2].id));
+      assert.strictEqual(siblings102.length, 2);
+    });
+
+    test('returns empty map when no stacks exist', async () => {
+      const { detectStacks } = await import('../../service/poller.js');
+
+      const items = [
+        {
+          id: 'https://github.com/myorg/app/pull/101',
+          number: 101,
+          repository_full_name: 'myorg/app',
+          _baseRefName: 'main',
+          _headRefName: 'feature-a',
+        },
+        {
+          id: 'https://github.com/myorg/app/pull/102',
+          number: 102,
+          repository_full_name: 'myorg/app',
+          _baseRefName: 'main',
+          _headRefName: 'feature-b',
+        },
+      ];
+
+      const stacks = detectStacks(items);
+
+      assert.strictEqual(stacks.size, 0, 'No stacks should be detected when all PRs are based on main');
+    });
+
+    test('handles PRs from different repos independently', async () => {
+      const { detectStacks } = await import('../../service/poller.js');
+
+      const items = [
+        {
+          id: 'https://github.com/myorg/app-a/pull/1',
+          number: 1,
+          repository_full_name: 'myorg/app-a',
+          _baseRefName: 'main',
+          _headRefName: 'feature-x',
+        },
+        {
+          id: 'https://github.com/myorg/app-b/pull/2',
+          number: 2,
+          repository_full_name: 'myorg/app-b',
+          _baseRefName: 'feature-x',
+          _headRefName: 'feature-y',
+        },
+      ];
+
+      const stacks = detectStacks(items);
+
+      // Even though app-b PR #2's base matches app-a PR #1's head,
+      // they're in different repos so should NOT be stacked
+      assert.strictEqual(stacks.size, 0, 'Should not match branches across different repos');
+    });
+
+    test('handles items missing branch refs gracefully', async () => {
+      const { detectStacks } = await import('../../service/poller.js');
+
+      const items = [
+        {
+          id: 'https://github.com/myorg/app/pull/101',
+          number: 101,
+          repository_full_name: 'myorg/app',
+          _baseRefName: 'main',
+          _headRefName: 'feature-part-1',
+        },
+        {
+          id: 'https://github.com/myorg/app/pull/102',
+          number: 102,
+          repository_full_name: 'myorg/app',
+          // Missing _baseRefName and _headRefName (enrichment failed)
+        },
+      ];
+
+      const stacks = detectStacks(items);
+
+      assert.strictEqual(stacks.size, 0, 'Should not crash on items without branch refs');
+    });
+
+    test('handles single item gracefully', async () => {
+      const { detectStacks } = await import('../../service/poller.js');
+
+      const items = [
+        {
+          id: 'https://github.com/myorg/app/pull/101',
+          number: 101,
+          repository_full_name: 'myorg/app',
+          _baseRefName: 'main',
+          _headRefName: 'feature-1',
+        },
+      ];
+
+      const stacks = detectStacks(items);
+
+      assert.strictEqual(stacks.size, 0, 'Single item cannot form a stack');
+    });
+
+    test('handles empty items array', async () => {
+      const { detectStacks } = await import('../../service/poller.js');
+
+      const stacks = detectStacks([]);
+
+      assert.strictEqual(stacks.size, 0);
+    });
+
+    test('uses repository.nameWithOwner as fallback for repo grouping', async () => {
+      const { detectStacks } = await import('../../service/poller.js');
+
+      const items = [
+        {
+          id: 'https://github.com/myorg/app/pull/101',
+          number: 101,
+          repository: { nameWithOwner: 'myorg/app' },
+          _baseRefName: 'main',
+          _headRefName: 'feature-part-1',
+        },
+        {
+          id: 'https://github.com/myorg/app/pull/102',
+          number: 102,
+          repository: { nameWithOwner: 'myorg/app' },
+          _baseRefName: 'feature-part-1',
+          _headRefName: 'feature-part-2',
+        },
+      ];
+
+      const stacks = detectStacks(items);
+
+      assert.ok(stacks.has(items[0].id));
+      assert.ok(stacks.has(items[1].id));
+    });
+  });
+
+  describe('enrichItemsWithBranchRefs', () => {
+    test('skips enrichment when detect_stacks is not set', async () => {
+      const { enrichItemsWithBranchRefs } = await import('../../service/poller.js');
+
+      const items = [{ number: 1, repository_full_name: 'org/repo' }];
+      const source = { tool: { command: ['gh', 'search', 'prs'] } }; // no detect_stacks
+
+      const result = await enrichItemsWithBranchRefs(items, source);
+
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0]._headRefName, undefined);
+      assert.strictEqual(result[0]._baseRefName, undefined);
+    });
+
+    test('skips enrichment for non-GitHub sources', async () => {
+      const { enrichItemsWithBranchRefs } = await import('../../service/poller.js');
+
+      const items = [{ number: 1, repository_full_name: 'org/repo' }];
+      const source = {
+        detect_stacks: true,
+        tool: { mcp: 'linear', name: 'list_issues' }
+      };
+
+      const result = await enrichItemsWithBranchRefs(items, source);
+
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0]._headRefName, undefined);
+      assert.strictEqual(result[0]._baseRefName, undefined);
+    });
+
+    test('skips items without repository info', async () => {
+      const { enrichItemsWithBranchRefs } = await import('../../service/poller.js');
+
+      const items = [
+        { number: 1 }, // no repository_full_name
+        { repository_full_name: 'org/repo' } // no number
+      ];
+      const source = {
+        detect_stacks: true,
+        tool: { command: ['gh', 'search', 'prs'] }
+      };
+
+      const result = await enrichItemsWithBranchRefs(items, source);
+
+      // Items returned unchanged (no API calls for invalid items)
+      assert.strictEqual(result.length, 2);
+      assert.strictEqual(result[0]._headRefName, undefined);
+      assert.strictEqual(result[1]._headRefName, undefined);
+    });
+  });
 });

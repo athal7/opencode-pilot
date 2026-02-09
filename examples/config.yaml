@@ -31,6 +31,8 @@ sources:
   - preset: github/my-issues
     prompt: worktree
 
+  # PR presets have detect_stacks: true by default, enabling session reuse
+  # across stacked PRs (where one PR's head branch = another's base branch)
   - preset: github/review-requests
 
   # PRs needing attention (conflicts OR human feedback)

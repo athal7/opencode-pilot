@@ -636,6 +636,167 @@ export async function enrichItemsWithMergeable(items, source, options = {}) {
 }
 
 /**
+ * Fetch branch ref names for a PR via gh CLI
+ * 
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {number} number - PR number
+ * @param {number} timeout - Timeout in ms
+ * @returns {Promise<object|null>} { headRefName, baseRefName } or null on error
+ */
+async function fetchBranchRefs(owner, repo, number, timeout) {
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+  
+  try {
+    const { stdout } = await Promise.race([
+      execAsync(`gh pr view ${number} -R ${owner}/${repo} --json headRefName,baseRefName`),
+      createTimeout(timeout, "gh pr view branch refs"),
+    ]);
+    
+    const data = JSON.parse(stdout.trim());
+    return data && data.headRefName && data.baseRefName ? data : null;
+  } catch (err) {
+    console.error(`[poller] Error fetching branch refs for ${owner}/${repo}#${number}: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * Enrich items with branch ref names for stack detection
+ * 
+ * For items from sources with detect_stacks: true, fetches headRefName and
+ * baseRefName via gh CLI and attaches them as _headRefName and _baseRefName
+ * fields for stack detection.
+ * 
+ * @param {Array} items - Items to enrich
+ * @param {object} source - Source configuration with optional detect_stacks
+ * @param {object} [options] - Options
+ * @param {number} [options.timeout] - Timeout in ms (default: 30000)
+ * @returns {Promise<Array>} Items with _headRefName and _baseRefName fields added
+ */
+export async function enrichItemsWithBranchRefs(items, source, options = {}) {
+  // Skip if not configured or not a GitHub source
+  if (!source.detect_stacks || !isGitHubSource(source)) {
+    return items;
+  }
+  
+  const timeout = options.timeout || DEFAULT_MCP_TIMEOUT;
+  
+  // Fetch branch refs for each item
+  const enrichedItems = [];
+  for (const item of items) {
+    // Extract owner/repo from item
+    const fullName = item.repository_full_name || item.repository?.nameWithOwner;
+    if (!fullName || !item.number) {
+      enrichedItems.push(item);
+      continue;
+    }
+    
+    const [owner, repo] = fullName.split("/");
+    const refs = await fetchBranchRefs(owner, repo, item.number, timeout);
+    if (refs) {
+      enrichedItems.push({ ...item, _headRefName: refs.headRefName, _baseRefName: refs.baseRefName });
+    } else {
+      enrichedItems.push(item);
+    }
+  }
+  
+  return enrichedItems;
+}
+
+/**
+ * Detect PR stacks from enriched items
+ * 
+ * Groups items by repo and finds stacks by matching headRefName/baseRefName:
+ * if PR A's headRefName equals PR B's baseRefName, they're in the same stack.
+ * Walks chains to handle 3+ PR stacks.
+ * 
+ * @param {Array} items - Items enriched with _headRefName and _baseRefName
+ * @returns {Map<string, string[]>} Map of itemId -> sibling itemIds (only stacked items included)
+ */
+export function detectStacks(items) {
+  const stacks = new Map();
+  
+  if (!items || items.length === 0) return stacks;
+  
+  // Group items by repo (stacks only make sense within same repo)
+  const byRepo = new Map();
+  for (const item of items) {
+    if (!item._headRefName || !item._baseRefName) continue;
+    
+    const repo = item.repository_full_name || item.repository?.nameWithOwner;
+    if (!repo) continue;
+    
+    if (!byRepo.has(repo)) {
+      byRepo.set(repo, []);
+    }
+    byRepo.get(repo).push(item);
+  }
+  
+  // For each repo group, find stacks
+  for (const [, repoItems] of byRepo) {
+    if (repoItems.length < 2) continue;
+    
+    // Build lookup: headRefName -> item
+    const headToItem = new Map();
+    for (const item of repoItems) {
+      headToItem.set(item._headRefName, item);
+    }
+    
+    // Find connected components (stacks) using union-find approach
+    // Two items are connected if one's headRefName equals the other's baseRefName
+    const parent = new Map(); // itemId -> root itemId
+    
+    function find(id) {
+      if (!parent.has(id)) parent.set(id, id);
+      if (parent.get(id) !== id) {
+        parent.set(id, find(parent.get(id)));
+      }
+      return parent.get(id);
+    }
+    
+    function union(a, b) {
+      const rootA = find(a);
+      const rootB = find(b);
+      if (rootA !== rootB) {
+        parent.set(rootA, rootB);
+      }
+    }
+    
+    // Connect items that form a stack
+    for (const item of repoItems) {
+      const baseMatch = headToItem.get(item._baseRefName);
+      if (baseMatch && baseMatch.id !== item.id) {
+        union(item.id, baseMatch.id);
+      }
+    }
+    
+    // Group items by their root to find stack members
+    const groups = new Map(); // root -> [itemIds]
+    for (const item of repoItems) {
+      if (!parent.has(item.id)) continue;
+      const root = find(item.id);
+      if (!groups.has(root)) {
+        groups.set(root, []);
+      }
+      groups.get(root).push(item.id);
+    }
+    
+    // Build sibling map for groups with 2+ members
+    for (const [, members] of groups) {
+      if (members.length < 2) continue;
+      for (const id of members) {
+        stacks.set(id, members.filter(m => m !== id));
+      }
+    }
+  }
+  
+  return stacks;
+}
+
+/**
  * Compute attention label from enriched item conditions
  * 
  * Examines _mergeable and _comments fields to determine what needs attention.
