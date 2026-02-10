@@ -22,7 +22,15 @@ module.exports = {
     // Publish to npm with provenance
     ['@semantic-release/npm', { provenance: true }],
     
-    // Create GitHub release (creates the tag/tarball)
+    // Commit version bump to package.json + package-lock.json back to repo
+    // Runs in 'prepare' phase AFTER npm bumps package.json, BEFORE GitHub creates the tag
+    // This ensures the GitHub tarball includes the correct version
+    ['@semantic-release/git', {
+      assets: ['package.json', 'package-lock.json'],
+      message: 'chore(release): ${nextRelease.version} [skip ci]'
+    }],
+    
+    // Create GitHub release (creates the tag/tarball from the version-bumped commit)
     '@semantic-release/github',
     
     // Update Homebrew formula with new version and SHA (runs after release is created)

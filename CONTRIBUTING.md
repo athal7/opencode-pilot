@@ -87,5 +87,6 @@ Releases are automated via [semantic-release](https://github.com/semantic-releas
 1. Run tests
 2. Determine the next version from commit messages
 3. Publish to npm
-4. Create a GitHub release
-5. Update the Homebrew formula
+4. Commit version bump (`package.json`, `package-lock.json`) back to the repo
+5. Create a GitHub release
+6. Update the Homebrew formula
