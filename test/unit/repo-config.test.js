@@ -656,7 +656,7 @@ sources:
       const sources = getSources();
 
       assert.strictEqual(sources.length, 1);
-      assert.strictEqual(sources[0].name, 'my-issues');
+      assert.strictEqual(sources[0].name, 'github-my-issues');
       // GitHub presets now use gh CLI instead of MCP
       assert.ok(Array.isArray(sources[0].tool.command), 'tool.command should be an array');
       assert.ok(sources[0].tool.command.includes('gh'), 'command should use gh CLI');
@@ -714,7 +714,7 @@ sources:
       loadRepoConfig(configPath);
       const sources = getSources();
 
-      assert.strictEqual(sources[0].name, 'my-issues');
+      assert.strictEqual(sources[0].name, 'linear-my-issues');
       assert.deepStrictEqual(sources[0].tool, { mcp: 'linear', name: 'list_issues' });
       assert.strictEqual(sources[0].args.teamId, 'team-uuid-123');
       assert.strictEqual(sources[0].args.assigneeId, 'user-uuid-456');
@@ -911,6 +911,43 @@ sources:
 
       // linear uses the issue identifier (e.g., "ABC-123")
       assert.strictEqual(sources[0].worktree_name, '{number}', 'linear preset should use {number} (identifier)');
+    });
+
+    test('all preset names are globally unique (no cross-provider collisions)', async () => {
+      const { listPresets, expandPreset } = await import('../../service/presets/index.js');
+      const presets = listPresets();
+      
+      const nameToPreset = new Map();
+      for (const presetKey of presets) {
+        const expanded = expandPreset(presetKey, {});
+        const name = expanded.name;
+        
+        assert.ok(!nameToPreset.has(name),
+          `Duplicate source name "${name}" from presets "${nameToPreset.get(name)}" and "${presetKey}". ` +
+          `Source names must be unique to prevent cross-source pollution in poll state tracking.`);
+        nameToPreset.set(name, presetKey);
+      }
+    });
+
+    test('github and linear my-issues presets have distinct names when used together', async () => {
+      writeFileSync(configPath, `
+sources:
+  - preset: linear/my-issues
+    args:
+      teamId: "team-uuid"
+      assigneeId: "user-uuid"
+  - preset: github/my-issues
+`);
+
+      const { loadRepoConfig, getSources } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      const sources = getSources();
+
+      assert.strictEqual(sources.length, 2);
+      assert.notStrictEqual(sources[0].name, sources[1].name,
+        'Linear and GitHub my-issues presets must have different names');
+      assert.strictEqual(sources[0].name, 'linear-my-issues');
+      assert.strictEqual(sources[1].name, 'github-my-issues');
     });
 
   });

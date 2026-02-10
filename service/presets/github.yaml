@@ -18,7 +18,7 @@ _provider:
 
 # Presets
 my-issues:
-  name: my-issues
+  name: github-my-issues
   tool:
     command: ["gh", "search", "issues", "--assignee=@me", "--state=open", "--json", "number,title,url,repository,state,body,updatedAt"]
   item:
