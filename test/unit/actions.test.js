@@ -1263,6 +1263,103 @@ Check for bugs and security issues.`;
     });
   });
 
+  describe('createSessionViaApi timeout handling', () => {
+    test('treats safety timeout as error with warning (not silent success)', async () => {
+      const { createSessionViaApi } = await import('../../service/actions.js');
+      
+      const mockSessionId = 'ses_timeout123';
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        // Session creation succeeds
+        if (urlObj.pathname === '/session' && opts?.method === 'POST') {
+          return {
+            ok: true,
+            json: async () => ({ id: mockSessionId }),
+          };
+        }
+        
+        // Title update succeeds
+        if (opts?.method === 'PATCH') {
+          return { ok: true, json: async () => ({}) };
+        }
+        
+        // Message endpoint: simulate server never returning headers
+        // by waiting until the AbortSignal fires
+        if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
+          return new Promise((resolve, reject) => {
+            if (opts.signal) {
+              opts.signal.addEventListener('abort', () => {
+                reject(new DOMException('The operation was aborted.', 'AbortError'));
+              });
+            }
+          });
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await createSessionViaApi(
+        'http://localhost:4096',
+        '/path/to/project',
+        'Fix the bug',
+        { fetch: mockFetch, title: 'Test Session', headerTimeout: 100 }
+      );
+      
+      // Should return success (session was created) but WITH a warning
+      assert.ok(result.success, 'Should return success because session was created');
+      assert.strictEqual(result.sessionId, mockSessionId, 'Should return session ID');
+      assert.ok(result.warning, 'Should include warning about timeout');
+      assert.ok(result.warning.includes('did not confirm acceptance'), 'Warning should mention acceptance timeout');
+    });
+
+    test('aborts body stream after receiving 200 headers', async () => {
+      const { createSessionViaApi } = await import('../../service/actions.js');
+      
+      const mockSessionId = 'ses_headers123';
+      let bodyAborted = false;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        if (urlObj.pathname === '/session' && opts?.method === 'POST') {
+          return {
+            ok: true,
+            json: async () => ({ id: mockSessionId }),
+          };
+        }
+        
+        if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
+          // Track when the signal aborts (should happen after we return 200)
+          if (opts.signal) {
+            opts.signal.addEventListener('abort', () => {
+              bodyAborted = true;
+            });
+          }
+          // Return 200 immediately (simulating headers received)
+          return {
+            ok: true,
+            json: async () => ({ success: true }),
+          };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      const result = await createSessionViaApi(
+        'http://localhost:4096',
+        '/path/to/project',
+        'Fix the bug',
+        { fetch: mockFetch }
+      );
+      
+      assert.ok(result.success, 'Should succeed');
+      assert.ok(!result.warning, 'Should NOT have a warning');
+      assert.ok(bodyAborted, 'Should have aborted the body stream after receiving headers');
+    });
+  });
+
   describe('sendMessageToSession slash command routing', () => {
     test('uses /command endpoint for slash commands', async () => {
       const { sendMessageToSession } = await import('../../service/actions.js');

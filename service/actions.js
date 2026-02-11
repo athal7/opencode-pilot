@@ -14,6 +14,12 @@ import { resolveWorktreeDirectory, getProjectInfo, getProjectInfoForDirectory } 
 import path from "path";
 import os from "os";
 
+// Safety timeout for the server to return HTTP response headers.
+// The /command endpoint can take 30-45s to return headers because it does
+// work before responding. The /message endpoint returns headers in ~1ms.
+// These are generous upper bounds — if exceeded, the server is genuinely stuck.
+export const HEADER_TIMEOUT_MS = 60_000;
+
 /**
  * Parse a slash command from the beginning of a prompt
  * Returns null if the prompt doesn't start with a slash command
@@ -519,6 +525,7 @@ export function selectBestSession(sessions, statuses) {
  */
 export async function sendMessageToSession(serverUrl, sessionId, directory, prompt, options = {}) {
   const fetchFn = options.fetch || fetch;
+  const headerTimeout = options.headerTimeout || HEADER_TIMEOUT_MS;
   
   try {
     // Step 1: Update session title if provided
@@ -536,9 +543,16 @@ export async function sendMessageToSession(serverUrl, sessionId, directory, prom
     // Step 2: Check if the prompt starts with a slash command
     const parsedCommand = parseSlashCommand(prompt);
     
-    // Use AbortController with timeout (same pattern as createSessionViaApi)
+    // Wait for response headers (confirming server accepted the request),
+    // then abort the body stream. Safety timeout catches stuck requests.
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    let headersReceived = false;
+    const timeoutId = setTimeout(() => {
+      if (!headersReceived) {
+        debug(`sendMessageToSession: safety timeout - server did not return headers within ${headerTimeout}ms for session ${sessionId}`);
+        controller.abort();
+      }
+    }, headerTimeout);
     
     try {
       let response;
@@ -580,6 +594,8 @@ export async function sendMessageToSession(serverUrl, sessionId, directory, prom
         });
       }
       
+      // Headers received — cancel the safety timeout
+      headersReceived = true;
       clearTimeout(timeoutId);
       
       if (!response.ok) {
@@ -587,14 +603,17 @@ export async function sendMessageToSession(serverUrl, sessionId, directory, prom
         throw new Error(`Failed to send ${parsedCommand ? 'command' : 'message'}: ${response.status} ${errorText}`);
       }
       
-      debug(`sendMessageToSession: sent ${parsedCommand ? 'command' : 'message'} to session ${sessionId}`);
+      debug(`sendMessageToSession: ${parsedCommand ? 'command' : 'message'} accepted by server for session ${sessionId}`);
     } catch (abortErr) {
       clearTimeout(timeoutId);
-      if (abortErr.name === 'AbortError') {
-        debug(`sendMessageToSession: request started for session ${sessionId} (response aborted as expected)`);
-      } else {
-        throw abortErr;
+      if (abortErr.name === 'AbortError' && !headersReceived) {
+        throw new Error(`Server did not confirm acceptance within ${headerTimeout / 1000}s for session ${sessionId}`);
       }
+      throw abortErr;
+    } finally {
+      // Abort the body stream — we don't need the streaming response content.
+      // Done in finally to ensure cleanup regardless of success/error path.
+      controller.abort();
     }
     
     return {
@@ -670,6 +689,7 @@ export async function findReusableSession(serverUrl, directory, options = {}) {
  */
 export async function createSessionViaApi(serverUrl, directory, prompt, options = {}) {
   const fetchFn = options.fetch || fetch;
+  const headerTimeout = options.headerTimeout || HEADER_TIMEOUT_MS;
   
   let session = null;
   
@@ -706,11 +726,18 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
     // Step 3: Check if the prompt starts with a slash command
     const parsedCommand = parseSlashCommand(prompt);
     
-    // Use AbortController with timeout for the request
-    // The endpoints return a chunked/streaming response that stays open until
-    // the agent completes. We only need to verify the request was accepted.
+    // Wait for the server to return response headers (confirming it accepted the
+    // request), then abort the body stream. The /command endpoint can take 30-45s
+    // to return headers — we must NOT abort before that or we can't tell if the
+    // server actually accepted. A generous safety timeout catches truly stuck requests.
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    let headersReceived = false;
+    const timeoutId = setTimeout(() => {
+      if (!headersReceived) {
+        debug(`createSessionViaApi: safety timeout - server did not return headers within ${headerTimeout}ms for session ${session.id}`);
+        controller.abort();
+      }
+    }, headerTimeout);
     
     try {
       let response;
@@ -755,6 +782,8 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
         });
       }
       
+      // Headers received — cancel the safety timeout
+      headersReceived = true;
       clearTimeout(timeoutId);
       
       if (!response.ok) {
@@ -762,16 +791,19 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
         throw new Error(`Failed to send ${parsedCommand ? 'command' : 'message'}: ${response.status} ${errorText}`);
       }
       
-      debug(`createSessionViaApi: sent ${parsedCommand ? 'command' : 'message'} to session ${session.id}`);
+      debug(`createSessionViaApi: ${parsedCommand ? 'command' : 'message'} accepted by server for session ${session.id}`);
     } catch (abortErr) {
       clearTimeout(timeoutId);
-      // AbortError is expected - we intentionally abort after verifying the request started
-      // The server accepted our request, we just don't need to wait for the response
-      if (abortErr.name === 'AbortError') {
-        debug(`createSessionViaApi: request started for session ${session.id} (response aborted as expected)`);
-      } else {
-        throw abortErr;
+      if (abortErr.name === 'AbortError' && !headersReceived) {
+        // Safety timeout fired before headers arrived.
+        // The server may or may not have accepted the request — we don't know.
+        throw new Error(`Server did not confirm acceptance within ${headerTimeout / 1000}s for session ${session.id}`);
       }
+      throw abortErr;
+    } finally {
+      // Abort the body stream — we don't need the streaming response content.
+      // Done in finally to ensure cleanup regardless of success/error path.
+      controller.abort();
     }
     
     return {
@@ -903,6 +935,7 @@ async function executeInDirectory(serverUrl, cwd, item, config, options = {}) {
     sessionId: result.sessionId,
     directory: cwd,
     error: result.error,
+    warning: result.warning,
   };
 }
 
