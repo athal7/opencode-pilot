@@ -687,16 +687,17 @@ export async function findReusableSession(serverUrl, directory, options = {}) {
 export async function createSessionViaApi(serverUrl, directory, prompt, options = {}) {
   const fetchFn = options.fetch || fetch;
   const headerTimeout = options.headerTimeout || HEADER_TIMEOUT_MS;
-  // Use project directory for session creation (determines projectID in OpenCode).
-  // The working directory (which may be a worktree) is used for messages/commands.
   const projectDir = options.projectDirectory || directory;
   
   let session = null;
   
   try {
-    // Step 1: Create session scoped to the project directory
+    // Step 1: Create session with the working directory (may be a worktree).
+    // This sets the session's working directory so the agent operates in the
+    // correct location. For worktree sessions, the server may assign
+    // projectID 'global' since sandbox paths don't match project worktrees.
     const sessionUrl = new URL('/session', serverUrl);
-    sessionUrl.searchParams.set('directory', projectDir);
+    sessionUrl.searchParams.set('directory', directory);
     
     const createResponse = await fetchFn(sessionUrl.toString(), {
       method: 'POST',
@@ -712,14 +713,20 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
     session = await createResponse.json();
     debug(`createSessionViaApi: created session ${session.id} in ${directory}`);
     
-    // Step 2: Update session title if provided
-    if (options.title) {
+    // Step 2: Update session - always PATCH with project directory when it
+    // differs from the working directory (worktree case). This re-associates
+    // the session with the correct project so it appears in the UI.
+    // Also set the title if provided.
+    const needsProjectScoping = projectDir !== directory;
+    if (options.title || needsProjectScoping) {
       const updateUrl = new URL(`/session/${session.id}`, serverUrl);
       updateUrl.searchParams.set('directory', projectDir);
+      const patchBody = {};
+      if (options.title) patchBody.title = options.title;
       await fetchFn(updateUrl.toString(), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: options.title }),
+        body: JSON.stringify(patchBody),
       });
     }
     

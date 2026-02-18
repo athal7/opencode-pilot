@@ -564,9 +564,9 @@ describe("integration: worktree creation with worktree_name", () => {
     assert.ok(worktreeCreateCalled, "Should create worktree when worktree_name is configured");
     assert.strictEqual(createdWorktreeName, "pr-42", "Should expand worktree_name template");
     assert.ok(sessionCreated, "Should create session");
-    // Session creation uses the project directory (for correct projectID scoping)
-    // The worktree path is used for messages/commands (file operations)
-    assert.strictEqual(sessionDirectory, "/proj", "Session should be scoped to project directory");
+    // Session creation uses the worktree directory (sets working directory)
+    // The PATCH with project directory re-associates it with the correct project
+    assert.strictEqual(sessionDirectory, "/worktree/pr-42", "Session should be created in worktree directory");
   });
 
   it("reuses stored directory when reprocessing same item", async () => {
@@ -618,8 +618,8 @@ describe("integration: worktree creation with worktree_name", () => {
     assert.ok(result.success, "Action should succeed");
     // Should NOT create a new worktree since we have existing_directory
     assert.strictEqual(worktreeCreateCalled, false, "Should NOT create new worktree when existing_directory provided");
-    // Session creation uses the project directory (for correct projectID scoping)
-    assert.strictEqual(sessionDirectory, "/proj", "Session should be scoped to project directory");
+    // Session creation uses the existing worktree directory (sets working directory)
+    assert.strictEqual(sessionDirectory, existingWorktreeDir, "Session should be created in existing worktree directory");
   });
 
   it("skips session reuse when working in a worktree", async () => {
@@ -631,6 +631,7 @@ describe("integration: worktree creation with worktree_name", () => {
     let sessionListQueried = false;
     let sessionCreated = false;
     let sessionCreateDirectory = null;
+    let patchDirectory = null;
     
     const existingWorktreeDir = "/worktree/calm-wizard";
     
@@ -654,7 +655,10 @@ describe("integration: worktree creation with worktree_name", () => {
         sessionCreateDirectory = req.query?.directory;
         return { body: { id: "ses_new" } };
       },
-      "PATCH /session/ses_new": () => ({ body: {} }),
+      "PATCH /session/ses_new": (req) => {
+        patchDirectory = req.query?.directory;
+        return { body: {} };
+      },
       "POST /session/ses_new/message": () => ({ body: { success: true } }),
       "POST /session/ses_new/command": () => ({ body: { success: true } }),
     });
@@ -674,10 +678,13 @@ describe("integration: worktree creation with worktree_name", () => {
     // Should NOT query for existing sessions when in a worktree
     assert.strictEqual(sessionListQueried, false,
       "Should skip session reuse entirely when in a worktree");
-    // Should create a new session scoped to the project directory
+    // Should create a new session with the worktree directory (correct working dir)
     assert.ok(sessionCreated, "Should create a new session");
-    assert.strictEqual(sessionCreateDirectory, "/proj",
-      "New session should be scoped to project directory");
+    assert.strictEqual(sessionCreateDirectory, existingWorktreeDir,
+      "Session should be created in worktree directory");
+    // PATCH re-associates the session with the correct project
+    assert.strictEqual(patchDirectory, "/proj",
+      "PATCH should use project directory for correct project scoping");
   });
 });
 
