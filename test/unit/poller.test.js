@@ -855,7 +855,7 @@ describe('poller.js', () => {
       );
     });
 
-    test('shouldReprocess returns false when attention stays true with no timestamps', async () => {
+    test('shouldReprocess returns false when attention stays true with no timestamps on either side', async () => {
       const { createPoller } = await import('../../service/poller.js');
       
       const poller = createPoller({ stateFile });
@@ -871,7 +871,28 @@ describe('poller.js', () => {
       assert.strictEqual(
         poller.shouldReprocess(item, { reprocessOn: ['attention'] }), 
         false,
-        'Should NOT reprocess when no timestamps available (legacy)'
+        'Should NOT reprocess when no timestamps available on either side'
+      );
+    });
+
+    test('shouldReprocess returns true when legacy entry has no stored feedback timestamp but current item does', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      // Legacy item processed with attention but before latestFeedbackAt was tracked
+      poller.markProcessed('pr-1', { 
+        source: 'my-prs-attention', 
+        itemState: 'open',
+        hasAttention: true
+        // Note: no latestFeedbackAt
+      });
+      
+      // Item now has feedback with a timestamp (new review received)
+      const item = { id: 'pr-1', state: 'open', _has_attention: true, _latest_feedback_at: '2026-02-17T15:11:15Z' };
+      assert.strictEqual(
+        poller.shouldReprocess(item, { reprocessOn: ['attention'] }), 
+        true,
+        'Should reprocess legacy entries when new feedback is detected'
       );
     });
 

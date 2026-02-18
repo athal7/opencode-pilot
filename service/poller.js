@@ -1275,6 +1275,10 @@ export function createPoller(options = {}) {
             const storedFeedbackAt = meta.latestFeedbackAt;
             const currentFeedbackAt = item._latest_feedback_at;
             
+            // No stored baseline: any current feedback is new (legacy state entries)
+            if (!storedFeedbackAt && currentFeedbackAt) {
+              return true;
+            }
             if (storedFeedbackAt && currentFeedbackAt && currentFeedbackAt > storedFeedbackAt) {
               return true;
             }
