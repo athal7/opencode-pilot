@@ -310,6 +310,9 @@ export async function pollOnce(options = {}) {
                 // Store attention state for detecting new feedback on PRs
                 // _has_attention is boolean for enriched items, undefined for non-PR sources
                 hasAttention: item._has_attention ?? null,
+                // Store latest feedback timestamp for detecting new reviews on PRs
+                // that were already processed with existing feedback (true -> true)
+                latestFeedbackAt: item._latest_feedback_at ?? null,
                 dedupKeys: dedupKeys.length > 0 ? dedupKeys : undefined,
               });
             }

@@ -12,7 +12,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { getNestedValue, hasNonBotFeedback, extractIssueRefs } from "./utils.js";
+import { getNestedValue, hasNonBotFeedback, getLatestFeedbackTimestamp, extractIssueRefs } from "./utils.js";
 
 /**
  * Expand template string with item fields
@@ -809,6 +809,7 @@ export function detectStacks(items) {
 export function computeAttentionLabels(items, source) {
   return items.map(item => {
     const reasons = [];
+    let latestFeedbackAt = null;
     
     // Check for merge conflicts
     if (item._mergeable === 'CONFLICTING') {
@@ -821,6 +822,8 @@ export function computeAttentionLabels(items, source) {
       const authorUsername = item.user?.login || item.author?.login;
       if (hasNonBotFeedback(item._comments, authorUsername)) {
         reasons.push('Feedback');
+        // Track the latest feedback timestamp for detecting new reviews
+        latestFeedbackAt = getLatestFeedbackTimestamp(item._comments, authorUsername);
       }
     }
     
@@ -831,6 +834,7 @@ export function computeAttentionLabels(items, source) {
       ...item,
       _attention_label: label,
       _has_attention: reasons.length > 0,
+      _latest_feedback_at: latestFeedbackAt,
     };
   });
 }
@@ -1253,14 +1257,27 @@ export function createPoller(options = {}) {
         }
         
         // Handle attention field (detect new feedback on PRs)
-        // Only reprocess when attention changes from false to true
+        // Triggers when:
+        // 1. Attention changes from false to true (new feedback on a clean PR)
+        // 2. Attention stays true but latest feedback is newer (re-review or additional feedback)
         if (field === 'attention') {
           const storedHasAttention = meta.hasAttention;
           const currentHasAttention = item._has_attention;
           
-          // Only trigger if we have stored state (not legacy items) and attention changed false -> true
+          // Trigger if attention changed false -> true
           if (storedHasAttention === false && currentHasAttention === true) {
             return true;
+          }
+          
+          // Trigger if attention stayed true but there's newer feedback
+          // This catches re-reviews and additional feedback on PRs already processed with feedback
+          if (storedHasAttention === true && currentHasAttention === true) {
+            const storedFeedbackAt = meta.latestFeedbackAt;
+            const currentFeedbackAt = item._latest_feedback_at;
+            
+            if (storedFeedbackAt && currentFeedbackAt && currentFeedbackAt > storedFeedbackAt) {
+              return true;
+            }
           }
         }
       }

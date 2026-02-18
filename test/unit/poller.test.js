@@ -813,23 +813,65 @@ describe('poller.js', () => {
       );
     });
 
-    test('shouldReprocess returns false when attention stays true', async () => {
+    test('shouldReprocess returns false when attention stays true with same feedback timestamp', async () => {
       const { createPoller } = await import('../../service/poller.js');
       
       const poller = createPoller({ stateFile });
-      // Item was processed with attention
+      // Item was processed with attention and a feedback timestamp
+      poller.markProcessed('pr-1', { 
+        source: 'my-prs-attention', 
+        itemState: 'open',
+        hasAttention: true,
+        latestFeedbackAt: '2026-01-15T10:00:00Z'
+      });
+      
+      // Item still has attention with the same feedback timestamp
+      const item = { id: 'pr-1', state: 'open', _has_attention: true, _latest_feedback_at: '2026-01-15T10:00:00Z' };
+      assert.strictEqual(
+        poller.shouldReprocess(item, { reprocessOn: ['attention'] }), 
+        false,
+        'Should NOT reprocess when attention stays true with same feedback'
+      );
+    });
+
+    test('shouldReprocess returns true when attention stays true but feedback is newer (re-review)', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      // Item was processed with attention and a feedback timestamp
+      poller.markProcessed('pr-1', { 
+        source: 'my-prs-attention', 
+        itemState: 'open',
+        hasAttention: true,
+        latestFeedbackAt: '2026-01-15T10:00:00Z'
+      });
+      
+      // Item has newer feedback (re-review or additional comments)
+      const item = { id: 'pr-1', state: 'open', _has_attention: true, _latest_feedback_at: '2026-01-16T14:30:00Z' };
+      assert.strictEqual(
+        poller.shouldReprocess(item, { reprocessOn: ['attention'] }), 
+        true,
+        'Should reprocess when there is newer feedback (re-review)'
+      );
+    });
+
+    test('shouldReprocess returns false when attention stays true with no timestamps', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+      
+      const poller = createPoller({ stateFile });
+      // Legacy item processed with attention but no timestamp
       poller.markProcessed('pr-1', { 
         source: 'my-prs-attention', 
         itemState: 'open',
         hasAttention: true
       });
       
-      // Item still has attention
+      // Item still has attention (no timestamp available either)
       const item = { id: 'pr-1', state: 'open', _has_attention: true };
       assert.strictEqual(
         poller.shouldReprocess(item, { reprocessOn: ['attention'] }), 
         false,
-        'Should NOT reprocess when attention stays true'
+        'Should NOT reprocess when no timestamps available (legacy)'
       );
     });
 
@@ -1387,6 +1429,43 @@ describe('poller.js', () => {
       
       assert.strictEqual(result[0]._attention_label, 'PR');
       assert.strictEqual(result[0]._has_attention, false);
+    });
+
+    test('tracks latest feedback timestamp for detecting re-reviews', async () => {
+      const { computeAttentionLabels } = await import('../../service/poller.js');
+      
+      const items = [{
+        number: 123,
+        title: 'Test PR',
+        user: { login: 'author' },
+        _mergeable: 'MERGEABLE',
+        _comments: [
+          { user: { login: 'reviewer1', type: 'User' }, body: 'Fix this', created_at: '2026-01-10T10:00:00Z', updated_at: '2026-01-10T10:00:00Z' },
+          { user: { login: 'reviewer2', type: 'User' }, state: 'CHANGES_REQUESTED', body: 'Also this', submitted_at: '2026-01-15T14:30:00Z' },
+        ]
+      }];
+      
+      const result = computeAttentionLabels(items, {});
+      
+      assert.strictEqual(result[0]._has_attention, true);
+      assert.strictEqual(result[0]._latest_feedback_at, '2026-01-15T14:30:00Z');
+    });
+
+    test('sets latest feedback timestamp to null when no feedback', async () => {
+      const { computeAttentionLabels } = await import('../../service/poller.js');
+      
+      const items = [{
+        number: 123,
+        title: 'Test PR',
+        user: { login: 'author' },
+        _mergeable: 'MERGEABLE',
+        _comments: []
+      }];
+      
+      const result = computeAttentionLabels(items, {});
+      
+      assert.strictEqual(result[0]._has_attention, false);
+      assert.strictEqual(result[0]._latest_feedback_at, null);
     });
   });
 
