@@ -1,8 +1,8 @@
 class OpencodePilot < Formula
   desc "Automation daemon for OpenCode - polls GitHub/Linear issues and spawns sessions"
   homepage "https://github.com/athal7/opencode-pilot"
-  url "https://github.com/athal7/opencode-pilot/archive/refs/tags/v0.24.8.tar.gz"
-  sha256 "23b550fd74fee8f2fd8c60c8358f67065ee77af921fdc3bc2ff26a6cfef68ae6"
+  url "https://github.com/athal7/opencode-pilot/archive/refs/tags/v0.24.9.tar.gz"
+  sha256 "b477a5677fb80456db3f4f6464dd2071d0efb56bdd29b8a8fc01e5d56638f588"
   license "MIT"
 
   depends_on "node"
