@@ -192,38 +192,92 @@ export function hasNonBotFeedback(comments, authorUsername) {
   const authorLower = authorUsername?.toLowerCase();
   
   for (const comment of comments) {
-    const user = comment.user;
-    if (!user) continue;
-    
-    const username = user.login;
-    const userType = user.type;
-    
-    // Skip if it's a bot (but Copilot is NOT in bot list, so Copilot reviews are kept)
-    if (isBot(username, userType)) continue;
-    
-    // For author's own feedback, apply special rules
-    if (authorLower && username?.toLowerCase() === authorLower) {
-      // Author's PR reviews → trigger
-      if (isPrReview(comment)) {
-        // Continue to check if it's actionable (not approval-only)
-      }
-      // Author's inline comments (standalone only) → trigger
-      else if (isInlineComment(comment)) {
-        if (isReply(comment)) continue; // Skip replies
-        // Standalone inline comment - continue to actionable check
-      }
-      // Author's top-level comments → ignore
-      else {
-        continue;
-      }
-    }
-    
-    // Skip approval-only reviews (no actionable feedback)
-    if (isApprovalOnly(comment)) continue;
+    if (!isActionableFeedback(comment, authorLower)) continue;
     
     // Found actionable feedback
     return true;
   }
   
   return false;
+}
+
+/**
+ * Check if a single comment/review is actionable feedback
+ * 
+ * Extracted from hasNonBotFeedback to allow reuse in getLatestFeedbackTimestamp.
+ * 
+ * @param {object} comment - Comment or review object
+ * @param {string} [authorLower] - Lowercase author username
+ * @returns {boolean} True if the comment is actionable feedback
+ */
+function isActionableFeedback(comment, authorLower) {
+  const user = comment.user;
+  if (!user) return false;
+  
+  const username = user.login;
+  const userType = user.type;
+  
+  // Skip if it's a bot (but Copilot is NOT in bot list, so Copilot reviews are kept)
+  if (isBot(username, userType)) return false;
+  
+  // For author's own feedback, apply special rules
+  if (authorLower && username?.toLowerCase() === authorLower) {
+    // Author's PR reviews → trigger
+    if (isPrReview(comment)) {
+      // Continue to check if it's actionable (not approval-only)
+    }
+    // Author's inline comments (standalone only) → trigger
+    else if (isInlineComment(comment)) {
+      if (isReply(comment)) return false; // Skip replies
+      // Standalone inline comment - continue to actionable check
+    }
+    // Author's top-level comments → ignore
+    else {
+      return false;
+    }
+  }
+  
+  // Skip approval-only reviews (no actionable feedback)
+  if (isApprovalOnly(comment)) return false;
+  
+  return true;
+}
+
+/**
+ * Get the timestamp of the latest actionable feedback on a PR/issue
+ * 
+ * Uses the same filtering logic as hasNonBotFeedback to identify actionable
+ * comments, then returns the most recent timestamp. This allows detecting
+ * new feedback even when the PR was already processed with existing feedback.
+ * 
+ * GitHub API timestamp fields:
+ * - PR reviews: submitted_at
+ * - PR review comments (inline): updated_at, created_at
+ * - Issue comments: updated_at, created_at
+ * 
+ * @param {Array} comments - Array of comment/review objects
+ * @param {string} authorUsername - Username of the PR/issue author
+ * @returns {string|null} ISO timestamp of latest feedback, or null if none
+ */
+export function getLatestFeedbackTimestamp(comments, authorUsername) {
+  if (!comments || !Array.isArray(comments) || comments.length === 0) {
+    return null;
+  }
+  
+  const authorLower = authorUsername?.toLowerCase();
+  let latest = null;
+  
+  for (const comment of comments) {
+    if (!isActionableFeedback(comment, authorLower)) continue;
+    
+    // PR reviews use submitted_at, comments use updated_at or created_at
+    const timestamp = comment.submitted_at || comment.updated_at || comment.created_at;
+    if (!timestamp) continue;
+    
+    if (!latest || timestamp > latest) {
+      latest = timestamp;
+    }
+  }
+  
+  return latest;
 }

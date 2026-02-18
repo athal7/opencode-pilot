@@ -192,6 +192,71 @@ describe('utils.js', () => {
     });
   });
 
+  describe('getLatestFeedbackTimestamp', () => {
+    test('returns null for empty/null/undefined comments', async () => {
+      const { getLatestFeedbackTimestamp } = await import('../../service/utils.js');
+      
+      assert.strictEqual(getLatestFeedbackTimestamp([], 'author'), null);
+      assert.strictEqual(getLatestFeedbackTimestamp(null, 'author'), null);
+      assert.strictEqual(getLatestFeedbackTimestamp(undefined, 'author'), null);
+    });
+
+    test('returns latest timestamp from actionable feedback', async () => {
+      const { getLatestFeedbackTimestamp } = await import('../../service/utils.js');
+      
+      const comments = [
+        { user: { login: 'reviewer1', type: 'User' }, body: 'Fix this', created_at: '2026-01-10T10:00:00Z', updated_at: '2026-01-10T10:00:00Z' },
+        { user: { login: 'reviewer2', type: 'User' }, body: 'Also this', created_at: '2026-01-15T14:30:00Z', updated_at: '2026-01-15T14:30:00Z' },
+      ];
+      
+      assert.strictEqual(getLatestFeedbackTimestamp(comments, 'author'), '2026-01-15T14:30:00Z');
+    });
+
+    test('uses submitted_at for PR reviews', async () => {
+      const { getLatestFeedbackTimestamp } = await import('../../service/utils.js');
+      
+      const comments = [
+        { user: { login: 'reviewer', type: 'User' }, state: 'CHANGES_REQUESTED', body: 'Fix this', submitted_at: '2026-01-20T09:00:00Z', created_at: '2026-01-15T10:00:00Z' },
+      ];
+      
+      assert.strictEqual(getLatestFeedbackTimestamp(comments, 'author'), '2026-01-20T09:00:00Z');
+    });
+
+    test('ignores bot comments when computing latest timestamp', async () => {
+      const { getLatestFeedbackTimestamp } = await import('../../service/utils.js');
+      
+      const comments = [
+        { user: { login: 'reviewer', type: 'User' }, body: 'Fix this', created_at: '2026-01-10T10:00:00Z', updated_at: '2026-01-10T10:00:00Z' },
+        { user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'CI passed', created_at: '2026-01-20T10:00:00Z', updated_at: '2026-01-20T10:00:00Z' },
+      ];
+      
+      assert.strictEqual(getLatestFeedbackTimestamp(comments, 'author'), '2026-01-10T10:00:00Z');
+    });
+
+    test('ignores approval-only reviews', async () => {
+      const { getLatestFeedbackTimestamp } = await import('../../service/utils.js');
+      
+      const comments = [
+        { user: { login: 'reviewer', type: 'User' }, body: 'Fix this', created_at: '2026-01-10T10:00:00Z', updated_at: '2026-01-10T10:00:00Z' },
+        { user: { login: 'approver', type: 'User' }, state: 'APPROVED', body: '', submitted_at: '2026-01-20T10:00:00Z' },
+      ];
+      
+      // Approval-only should be filtered out, latest is the first comment
+      assert.strictEqual(getLatestFeedbackTimestamp(comments, 'author'), '2026-01-10T10:00:00Z');
+    });
+
+    test('returns null when only bot comments exist', async () => {
+      const { getLatestFeedbackTimestamp } = await import('../../service/utils.js');
+      
+      const comments = [
+        { user: { login: 'linear', type: 'User' }, body: 'ENG-123', created_at: '2026-01-10T10:00:00Z' },
+        { user: { login: 'github-actions[bot]', type: 'Bot' }, body: 'CI passed', created_at: '2026-01-15T10:00:00Z' },
+      ];
+      
+      assert.strictEqual(getLatestFeedbackTimestamp(comments, 'author'), null);
+    });
+  });
+
   describe('isApprovalOnly', () => {
     test('returns true for APPROVED state with no body', async () => {
       const { isApprovalOnly } = await import('../../service/utils.js');
