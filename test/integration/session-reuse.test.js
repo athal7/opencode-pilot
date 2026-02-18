@@ -622,14 +622,15 @@ describe("integration: worktree creation with worktree_name", () => {
     assert.strictEqual(sessionDirectory, "/proj", "Session should be scoped to project directory");
   });
 
-  it("session reuse queries by project directory, not worktree directory", async () => {
-    // This tests the key fix: when reprocessing an item with a worktree,
-    // findReusableSession should query by the project directory (e.g., /proj)
-    // so it finds sessions created with correct scoping (v0.24.7+), rather
-    // than finding old sessions created with the worktree directory (projectID "global").
+  it("skips session reuse when working in a worktree", async () => {
+    // When working in a worktree (projectDirectory differs from cwd), session
+    // reuse is skipped entirely. Querying by worktree dir finds old sessions
+    // with projectID "global", querying by project dir finds unrelated sessions
+    // for other PRs. Each worktree should get its own correctly-scoped session.
     
-    let sessionQueryDirectory = null;
+    let sessionListQueried = false;
     let sessionCreated = false;
+    let sessionCreateDirectory = null;
     
     const existingWorktreeDir = "/worktree/calm-wizard";
     
@@ -643,25 +644,16 @@ describe("integration: worktree creation with worktree_name", () => {
       "GET /experimental/worktree": () => ({
         body: [existingWorktreeDir],
       }),
-      "GET /session": (req) => {
-        sessionQueryDirectory = req.directory;
-        // Return a session ONLY if queried by project directory
-        if (req.directory === "/proj") {
-          return {
-            body: [{ id: "ses_proj_scoped", directory: "/proj", time: { created: 1000, updated: 2000 } }],
-          };
-        }
-        // Old worktree-scoped sessions should NOT be found when querying by project dir
+      "GET /session": () => {
+        sessionListQueried = true;
         return { body: [] };
       },
       "GET /session/status": () => ({ body: {} }),
       "POST /session": (req) => {
         sessionCreated = true;
+        sessionCreateDirectory = req.query?.directory;
         return { body: { id: "ses_new" } };
       },
-      "PATCH /session/ses_proj_scoped": () => ({ body: {} }),
-      "POST /session/ses_proj_scoped/message": () => ({ body: { success: true } }),
-      "POST /session/ses_proj_scoped/command": () => ({ body: { success: true } }),
       "PATCH /session/ses_new": () => ({ body: {} }),
       "POST /session/ses_new/message": () => ({ body: { success: true } }),
       "POST /session/ses_new/command": () => ({ body: { success: true } }),
@@ -679,12 +671,13 @@ describe("integration: worktree creation with worktree_name", () => {
     );
 
     assert.ok(result.success, "Action should succeed");
-    // The session lookup should use the PROJECT directory, not the worktree directory
-    assert.strictEqual(sessionQueryDirectory, "/proj",
-      "findReusableSession should query by project directory, not worktree");
-    // Should reuse the project-scoped session, NOT create a new one
-    assert.strictEqual(result.sessionReused, true, "Should reuse the project-scoped session");
-    assert.strictEqual(sessionCreated, false, "Should NOT create a new session when project-scoped session exists");
+    // Should NOT query for existing sessions when in a worktree
+    assert.strictEqual(sessionListQueried, false,
+      "Should skip session reuse entirely when in a worktree");
+    // Should create a new session scoped to the project directory
+    assert.ok(sessionCreated, "Should create a new session");
+    assert.strictEqual(sessionCreateDirectory, "/proj",
+      "New session should be scoped to project directory");
   });
 });
 
