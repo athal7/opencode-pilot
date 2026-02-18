@@ -564,7 +564,9 @@ describe("integration: worktree creation with worktree_name", () => {
     assert.ok(worktreeCreateCalled, "Should create worktree when worktree_name is configured");
     assert.strictEqual(createdWorktreeName, "pr-42", "Should expand worktree_name template");
     assert.ok(sessionCreated, "Should create session");
-    assert.strictEqual(sessionDirectory, "/worktree/pr-42", "Session should be in worktree directory");
+    // Session creation uses the project directory (for correct projectID scoping)
+    // The worktree path is used for messages/commands (file operations)
+    assert.strictEqual(sessionDirectory, "/proj", "Session should be scoped to project directory");
   });
 
   it("reuses stored directory when reprocessing same item", async () => {
@@ -616,8 +618,8 @@ describe("integration: worktree creation with worktree_name", () => {
     assert.ok(result.success, "Action should succeed");
     // Should NOT create a new worktree since we have existing_directory
     assert.strictEqual(worktreeCreateCalled, false, "Should NOT create new worktree when existing_directory provided");
-    // Session should be created in the existing directory
-    assert.strictEqual(sessionDirectory, existingWorktreeDir, "Session should use existing directory");
+    // Session creation uses the project directory (for correct projectID scoping)
+    assert.strictEqual(sessionDirectory, "/proj", "Session should be scoped to project directory");
   });
 });
 

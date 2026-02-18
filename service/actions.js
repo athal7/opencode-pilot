@@ -673,14 +673,11 @@ export async function findReusableSession(serverUrl, directory, options = {}) {
 /**
  * Create a session via the OpenCode HTTP API
  * 
- * This is a workaround for the known issue where `opencode run --attach` 
- * doesn't support a --dir flag, causing sessions to run in the wrong directory
- * when attached to a global server.
- * 
  * @param {string} serverUrl - Server URL (e.g., "http://localhost:4096")
- * @param {string} directory - Working directory for the session
+ * @param {string} directory - Working directory for file operations (may be a worktree)
  * @param {string} prompt - The prompt/message to send
  * @param {object} [options] - Options
+ * @param {string} [options.projectDirectory] - Project directory for session scoping (defaults to directory)
  * @param {string} [options.title] - Session title
  * @param {string} [options.agent] - Agent to use
  * @param {string} [options.model] - Model to use
@@ -690,13 +687,16 @@ export async function findReusableSession(serverUrl, directory, options = {}) {
 export async function createSessionViaApi(serverUrl, directory, prompt, options = {}) {
   const fetchFn = options.fetch || fetch;
   const headerTimeout = options.headerTimeout || HEADER_TIMEOUT_MS;
+  // Use project directory for session creation (determines projectID in OpenCode).
+  // The working directory (which may be a worktree) is used for messages/commands.
+  const projectDir = options.projectDirectory || directory;
   
   let session = null;
   
   try {
-    // Step 1: Create a new session with the directory parameter
+    // Step 1: Create session scoped to the project directory
     const sessionUrl = new URL('/session', serverUrl);
-    sessionUrl.searchParams.set('directory', directory);
+    sessionUrl.searchParams.set('directory', projectDir);
     
     const createResponse = await fetchFn(sessionUrl.toString(), {
       method: 'POST',
@@ -715,7 +715,7 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
     // Step 2: Update session title if provided
     if (options.title) {
       const updateUrl = new URL(`/session/${session.id}`, serverUrl);
-      updateUrl.searchParams.set('directory', directory);
+      updateUrl.searchParams.set('directory', projectDir);
       await fetchFn(updateUrl.toString(), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -842,7 +842,7 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
  * @param {object} [options] - Execution options
  * @returns {Promise<object>} Result with command, success, sessionId, etc.
  */
-async function executeInDirectory(serverUrl, cwd, item, config, options = {}) {
+async function executeInDirectory(serverUrl, cwd, item, config, options = {}, projectDirectory = null) {
   // Build prompt from template
   const prompt = buildPromptFromTemplate(config.prompt || "default", item);
   
@@ -923,6 +923,7 @@ async function executeInDirectory(serverUrl, cwd, item, config, options = {}) {
   }
   
   const result = await createSessionViaApi(serverUrl, cwd, prompt, {
+    projectDirectory: projectDirectory || cwd,
     title: sessionTitle,
     agent: config.agent,
     model: config.model,
@@ -986,7 +987,7 @@ export async function executeAction(item, config, options = {}) {
   if (config.existing_directory) {
     debug(`executeAction: using existing_directory=${config.existing_directory}`);
     const cwd = expandPath(config.existing_directory);
-    return await executeInDirectory(serverUrl, cwd, item, config, options);
+    return await executeInDirectory(serverUrl, cwd, item, config, options, baseCwd);
   }
   
   // Resolve worktree directory if configured
@@ -1038,5 +1039,5 @@ export async function executeAction(item, config, options = {}) {
   
   debug(`executeAction: using cwd=${cwd}`);
   
-  return await executeInDirectory(serverUrl, cwd, item, config, options);
+  return await executeInDirectory(serverUrl, cwd, item, config, options, baseCwd);
 }

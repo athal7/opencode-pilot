@@ -981,11 +981,12 @@ Check for bugs and security issues.`;
       // Should NOT call worktree endpoints when existing_directory is provided
       assert.strictEqual(worktreeListCalled, false, 'Should NOT list worktrees');
       assert.strictEqual(worktreeCreateCalled, false, 'Should NOT create worktree');
-      // Should use the existing directory
-      assert.strictEqual(sessionDirectory, '/data/worktree/calm-wizard', 
-        'Should use existing_directory for session');
+      // Session creation uses project directory (for correct projectID scoping)
+      assert.strictEqual(sessionDirectory, '/data/proj', 
+        'Session creation should use project directory, not worktree');
+      // Result directory is the worktree (where file operations happen)
       assert.strictEqual(result.directory, '/data/worktree/calm-wizard',
-        'Result should include directory');
+        'Result should include worktree directory');
     });
   });
 
@@ -1039,6 +1040,52 @@ Check for bugs and security issues.`;
       assert.ok(createUrl.includes('%2Fpath%2Fto%2Fproject'), 'Create URL should include encoded directory path');
       assert.ok(messageUrl.includes('directory='), 'Message URL should include directory param');
       assert.ok(messageUrl.includes('%2Fpath%2Fto%2Fproject'), 'Message URL should include encoded directory path');
+    });
+
+    test('uses projectDirectory for session creation, working directory for messages', async () => {
+      const { createSessionViaApi } = await import('../../service/actions.js');
+      
+      const mockSessionId = 'ses_test_proj';
+      let createUrl = null;
+      let messageUrl = null;
+      
+      const mockFetch = async (url, opts) => {
+        const urlObj = new URL(url);
+        
+        if (urlObj.pathname === '/session' && opts?.method === 'POST') {
+          createUrl = url;
+          return { ok: true, json: async () => ({ id: mockSessionId }) };
+        }
+        
+        if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
+          messageUrl = url;
+          return { ok: true, json: async () => ({ success: true }) };
+        }
+        
+        return { ok: false, text: async () => 'Not found' };
+      };
+      
+      await createSessionViaApi(
+        'http://localhost:4096',
+        '/home/user/.local/share/opencode/worktree/abc123/pr-415',
+        'Fix the bug',
+        { 
+          fetch: mockFetch,
+          projectDirectory: '/home/user/code/odin',
+        }
+      );
+      
+      // Session creation should use the project directory (for correct projectID scoping)
+      assert.ok(createUrl.includes('%2Fhome%2Fuser%2Fcode%2Fodin'), 
+        'Session creation should use projectDirectory');
+      assert.ok(!createUrl.includes('worktree'), 
+        'Session creation should NOT use the worktree path');
+      
+      // Message should use the working directory (for file operations in the worktree)
+      assert.ok(messageUrl.includes('worktree'), 
+        'Message should use the worktree working directory');
+      assert.ok(messageUrl.includes('pr-415'), 
+        'Message should use the worktree working directory');
     });
 
     test('handles session creation failure', async () => {
