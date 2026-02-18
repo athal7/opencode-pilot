@@ -621,6 +621,71 @@ describe("integration: worktree creation with worktree_name", () => {
     // Session creation uses the project directory (for correct projectID scoping)
     assert.strictEqual(sessionDirectory, "/proj", "Session should be scoped to project directory");
   });
+
+  it("session reuse queries by project directory, not worktree directory", async () => {
+    // This tests the key fix: when reprocessing an item with a worktree,
+    // findReusableSession should query by the project directory (e.g., /proj)
+    // so it finds sessions created with correct scoping (v0.24.7+), rather
+    // than finding old sessions created with the worktree directory (projectID "global").
+    
+    let sessionQueryDirectory = null;
+    let sessionCreated = false;
+    
+    const existingWorktreeDir = "/worktree/calm-wizard";
+    
+    mockServer = await createMockServer({
+      "GET /project": () => ({
+        body: [{ id: "proj_1", worktree: "/proj", sandboxes: [], time: { created: 1 } }],
+      }),
+      "GET /project/current": () => ({
+        body: { id: "proj_1", worktree: "/proj", sandboxes: [], time: { created: 1 } },
+      }),
+      "GET /experimental/worktree": () => ({
+        body: [existingWorktreeDir],
+      }),
+      "GET /session": (req) => {
+        sessionQueryDirectory = req.directory;
+        // Return a session ONLY if queried by project directory
+        if (req.directory === "/proj") {
+          return {
+            body: [{ id: "ses_proj_scoped", directory: "/proj", time: { created: 1000, updated: 2000 } }],
+          };
+        }
+        // Old worktree-scoped sessions should NOT be found when querying by project dir
+        return { body: [] };
+      },
+      "GET /session/status": () => ({ body: {} }),
+      "POST /session": (req) => {
+        sessionCreated = true;
+        return { body: { id: "ses_new" } };
+      },
+      "PATCH /session/ses_proj_scoped": () => ({ body: {} }),
+      "POST /session/ses_proj_scoped/message": () => ({ body: { success: true } }),
+      "POST /session/ses_proj_scoped/command": () => ({ body: { success: true } }),
+      "PATCH /session/ses_new": () => ({ body: {} }),
+      "POST /session/ses_new/message": () => ({ body: { success: true } }),
+      "POST /session/ses_new/command": () => ({ body: { success: true } }),
+    });
+
+    const result = await executeAction(
+      { number: 42, title: "Review PR" },
+      { 
+        path: "/proj", 
+        prompt: "review",
+        worktree_name: "pr-{number}",
+        existing_directory: existingWorktreeDir,
+      },
+      { discoverServer: async () => mockServer.url }
+    );
+
+    assert.ok(result.success, "Action should succeed");
+    // The session lookup should use the PROJECT directory, not the worktree directory
+    assert.strictEqual(sessionQueryDirectory, "/proj",
+      "findReusableSession should query by project directory, not worktree");
+    // Should reuse the project-scoped session, NOT create a new one
+    assert.strictEqual(result.sessionReused, true, "Should reuse the project-scoped session");
+    assert.strictEqual(sessionCreated, false, "Should NOT create a new session when project-scoped session exists");
+  });
 });
 
 describe("integration: cross-source deduplication", () => {

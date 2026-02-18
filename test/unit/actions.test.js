@@ -2147,6 +2147,60 @@ Check for bugs and security issues.`;
       assert.strictEqual(result.id, 'ses_new');
     });
 
+    test('uses projectDirectory for session lookup when provided', async () => {
+      const { findReusableSession } = await import('../../service/actions.js');
+      
+      let queriedDirectory = null;
+      const mockFetch = async (url) => {
+        if (url.includes('/session/status')) {
+          return { ok: true, json: async () => ({}) };
+        }
+        // Capture the directory used in the session query
+        const urlObj = new URL(url);
+        queriedDirectory = urlObj.searchParams.get('directory');
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'ses_proj', time: { created: 1000, updated: 2000 } },
+          ],
+        };
+      };
+      
+      const result = await findReusableSession('http://localhost:4096', '/worktree/pr-415', { 
+        fetch: mockFetch,
+        projectDirectory: '/home/user/code/odin',
+      });
+      
+      assert.strictEqual(result.id, 'ses_proj');
+      assert.strictEqual(queriedDirectory, '/home/user/code/odin',
+        'Should query sessions using projectDirectory, not the worktree directory');
+    });
+
+    test('falls back to directory when projectDirectory not provided', async () => {
+      const { findReusableSession } = await import('../../service/actions.js');
+      
+      let queriedDirectory = null;
+      const mockFetch = async (url) => {
+        if (url.includes('/session/status')) {
+          return { ok: true, json: async () => ({}) };
+        }
+        const urlObj = new URL(url);
+        queriedDirectory = urlObj.searchParams.get('directory');
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'ses_1', time: { created: 1000, updated: 2000 } },
+          ],
+        };
+      };
+      
+      const result = await findReusableSession('http://localhost:4096', '/test/dir', { fetch: mockFetch });
+      
+      assert.strictEqual(result.id, 'ses_1');
+      assert.strictEqual(queriedDirectory, '/test/dir',
+        'Should query sessions using directory when projectDirectory not provided');
+    });
+
     test('falls back to busy session when no idle available', async () => {
       const { findReusableSession } = await import('../../service/actions.js');
       

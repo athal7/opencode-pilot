@@ -639,17 +639,26 @@ export async function sendMessageToSession(serverUrl, sessionId, directory, prom
  * @param {string} directory - Working directory to match
  * @param {object} [options] - Options
  * @param {function} [options.fetch] - Custom fetch function (for testing)
+ * @param {string} [options.projectDirectory] - Project directory for session lookup
+ *   (used instead of directory when provided, so sessions created with the project
+ *   directory are found instead of old worktree-scoped sessions)
  * @returns {Promise<object|null>} Session to reuse, or null
  */
 export async function findReusableSession(serverUrl, directory, options = {}) {
+  // Use project directory for session lookup when available.
+  // Sessions created with v0.24.7+ are scoped to the project directory,
+  // while messages use the worktree directory. Query the project directory
+  // to find correctly-scoped sessions.
+  const lookupDirectory = options.projectDirectory || directory;
+  
   // Get sessions for this directory
   const sessions = await listSessions(serverUrl, { 
-    directory, 
+    directory: lookupDirectory, 
     fetch: options.fetch 
   });
   
   if (sessions.length === 0) {
-    debug(`findReusableSession: no sessions found for ${directory}`);
+    debug(`findReusableSession: no sessions found for ${lookupDirectory}`);
     return null;
   }
   
@@ -657,11 +666,11 @@ export async function findReusableSession(serverUrl, directory, options = {}) {
   const activeSessions = sessions.filter(s => !isSessionArchived(s));
   
   if (activeSessions.length === 0) {
-    debug(`findReusableSession: all ${sessions.length} sessions are archived for ${directory}`);
+    debug(`findReusableSession: all ${sessions.length} sessions are archived for ${lookupDirectory}`);
     return null;
   }
   
-  debug(`findReusableSession: found ${activeSessions.length} active sessions for ${directory}`);
+  debug(`findReusableSession: found ${activeSessions.length} active sessions for ${lookupDirectory}`);
   
   // Get statuses to prefer idle sessions
   const statuses = await getSessionStatuses(serverUrl, { fetch: options.fetch });
@@ -886,7 +895,10 @@ async function executeInDirectory(serverUrl, cwd, item, config, options = {}, pr
   const reuseActiveSession = config.reuse_active_session !== false; // default true
   
   if (reuseActiveSession && !options.dryRun) {
-    const existingSession = await findReusableSession(serverUrl, cwd, { fetch: options.fetch });
+    const existingSession = await findReusableSession(serverUrl, cwd, { 
+      fetch: options.fetch,
+      projectDirectory: projectDirectory,
+    });
     
     if (existingSession) {
       debug(`executeInDirectory: found reusable session ${existingSession.id} for ${cwd}`);
