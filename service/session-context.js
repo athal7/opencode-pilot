@@ -1,49 +1,36 @@
 /**
  * session-context.js - SessionContext value object
  *
- * Encapsulates the two-directory problem that repeatedly caused session
- * creation regressions (v0.24.7 through v0.24.10).
+ * Tracks both the project directory (main git repo) and the working directory
+ * (which may be a sandbox/worktree) for session creation.
  *
- * ## The Problem
+ * ## How OpenCode's API actually works
  *
- * OpenCode's POST /session API accepts a single `directory` parameter that
- * conflates two distinct concerns:
+ * Verified against a real OpenCode server (see test/integration/real-server.test.js):
  *
- *   1. **Project scoping** (projectID) — which project the session belongs to
- *      in the desktop UI. Requires the *project directory* (the main git repo).
+ *   - POST /session?directory=X sets `session.directory = X` and derives
+ *     `session.projectID` from the git root of X. Sandbox directories are
+ *     git worktrees that share the same root commit as the parent repo, so
+ *     they get the correct projectID automatically. There is NO need to
+ *     create with the project directory for "project scoping".
  *
- *   2. **Working directory** — where the agent executes file operations.
- *      Requires the *worktree directory* when using git worktrees.
+ *   - PATCH /session/:id only updates title/archived. The ?directory param
+ *     is a routing parameter (determines which project to look in), NOT a
+ *     mutation of session.directory.
  *
- * When a worktree is active, these directories differ. Passing the wrong one
- * satisfies one requirement but silently breaks the other.
+ *   - GET /session?directory=X uses ?directory for both project routing
+ *     (middleware) and as an exact filter on session.directory (route handler).
+ *     This means sessions created with a sandbox dir are only visible when
+ *     querying with that sandbox dir — natural isolation per worktree.
  *
- * ## The Three Invariants
+ * ## Why SessionContext still carries both directories
  *
- * Any correct session creation MUST satisfy all three:
- *
- *   A. **Project scoping**: Session's projectID matches the project (not
- *      'global'). The session is visible in the desktop app.
- *      → Requires POST /session?directory=<projectDirectory>
- *
- *   B. **Working directory**: Agent operates in the correct location.
- *      In worktree mode the session's working dir must be the worktree path,
- *      so file reads/writes go to the right branch.
- *      → Requires per-message directory=<workingDirectory>
- *        (or PATCH /session/:id to update the session working dir)
- *
- *   C. **Session isolation**: Session reuse only finds sessions for the
- *      *same work item* (same PR/issue), not other PRs sharing the project.
- *      → Worktree sessions must NOT be reused across items; each PR gets
- *        its own session.
- *
- * ## The Solution
- *
- * - Create sessions with `projectDirectory` (satisfies A).
- * - Send messages with `workingDirectory` (satisfies B).
- * - Skip `findReusableSession` entirely when in a worktree (satisfies C),
- *   because neither the worktree path nor the project path can safely scope
- *   reuse to a single PR.
+ * Even though createSessionViaApi only needs workingDirectory, the project
+ * directory is still needed for:
+ *   - Worktree detection (isWorktree) — to skip session reuse for sandbox
+ *     sessions and prevent cross-PR contamination
+ *   - resolveWorktreeDirectory — needs the base project dir to create/list
+ *     worktrees via GET/POST /experimental/worktree?directory=<projectDir>
  *
  * ## Worktree Detection
  *
@@ -54,13 +41,13 @@
 export class SessionContext {
   /**
    * @param {string} projectDirectory - Base git repo path. Used for:
-   *   - POST /session?directory=... (sets projectID for UI visibility)
-   *   - PATCH /session/:id?directory=... (if post-creation re-scoping needed)
-   *   - listSessions query (for session reuse lookup in non-worktree mode)
+   *   - Worktree detection (isWorktree check for session isolation)
+   *   - Worktree API calls (GET/POST /experimental/worktree?directory=...)
    *
    * @param {string} workingDirectory - Directory where the agent does work. Used for:
+   *   - POST /session?directory=... (sets session.directory AND projectID)
    *   - POST /session/:id/message?directory=... (file operations)
-   *   - POST /session/:id/command?directory=... (slash commands)
+   *   - PATCH /session/:id?directory=... (routing for title updates)
    *   Equals projectDirectory when not using worktrees.
    */
   constructor(projectDirectory, workingDirectory) {
@@ -73,9 +60,8 @@ export class SessionContext {
 
   /**
    * True when the session runs in a worktree separate from the main repo.
-   * Worktree sessions must NOT participate in findReusableSession (invariant C):
-   * - Querying by workingDirectory finds old sessions scoped to 'global' (wrong projectID)
-   * - Querying by projectDirectory finds sessions for other PRs in the same project
+   * Worktree sessions skip findReusableSession to prevent cross-PR
+   * contamination — each PR/issue in its own sandbox gets its own session.
    */
   get isWorktree() {
     return this.projectDirectory !== this.workingDirectory;

@@ -982,9 +982,9 @@ Check for bugs and security issues.`;
       // Should NOT call worktree endpoints when existing_directory is provided
       assert.strictEqual(worktreeListCalled, false, 'Should NOT list worktrees');
       assert.strictEqual(worktreeCreateCalled, false, 'Should NOT create worktree');
-      // Session creation uses project directory (for correct projectID scoping)
-      assert.strictEqual(sessionDirectory, '/data/proj', 
-        'Session creation should use project directory, not worktree');
+      // Session creation uses worktree directory (sets actual working dir)
+      assert.strictEqual(sessionDirectory, '/data/worktree/calm-wizard', 
+        'Session creation should use worktree as working directory');
       // Result directory is the worktree (where file operations happen)
       assert.strictEqual(result.directory, '/data/worktree/calm-wizard',
         'Result should include worktree directory');
@@ -1043,11 +1043,12 @@ Check for bugs and security issues.`;
       assert.ok(messageUrl.includes('%2Fpath%2Fto%2Fproject'), 'Message URL should include encoded directory path');
     });
 
-    test('uses projectDirectory for session creation, working directory for messages', async () => {
+    test('uses workingDirectory for session creation, no PATCH when no title', async () => {
       const { createSessionViaApi } = await import('../../service/actions.js');
       
       const mockSessionId = 'ses_test_proj';
       let createUrl = null;
+      let patchCalled = false;
       let messageUrl = null;
       
       const mockFetch = async (url, opts) => {
@@ -1056,6 +1057,11 @@ Check for bugs and security issues.`;
         if (urlObj.pathname === '/session' && opts?.method === 'POST') {
           createUrl = url;
           return { ok: true, json: async () => ({ id: mockSessionId }) };
+        }
+        
+        if (opts?.method === 'PATCH') {
+          patchCalled = true;
+          return { ok: true, json: async () => ({}) };
         }
         
         if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
@@ -1076,13 +1082,17 @@ Check for bugs and security issues.`;
         { fetch: mockFetch }
       );
       
-      // Session creation should use the project directory (for correct projectID scoping)
-      assert.ok(createUrl.includes('%2Fhome%2Fuser%2Fcode%2Fodin'), 
-        'Session creation should use projectDirectory');
-      assert.ok(!createUrl.includes('worktree'), 
-        'Session creation should NOT use the worktree path');
+      // Session creation should use the worktree directory
+      assert.ok(createUrl.includes('worktree'), 
+        'Session creation should use workingDirectory (worktree path)');
+      assert.ok(createUrl.includes('pr-415'), 
+        'Session creation should use workingDirectory (worktree path)');
       
-      // Message should use the working directory (for file operations in the worktree)
+      // No PATCH when no title is provided — no "project re-scoping" needed
+      assert.strictEqual(patchCalled, false, 
+        'PATCH should NOT be called when no title (no project re-scoping needed)');
+      
+      // Message should use the working directory
       assert.ok(messageUrl.includes('worktree'), 
         'Message should use the worktree working directory');
       assert.ok(messageUrl.includes('pr-415'), 

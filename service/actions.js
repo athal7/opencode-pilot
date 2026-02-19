@@ -4,19 +4,19 @@
  * Starts OpenCode sessions with configurable prompts.
  * Supports prompt_template for custom prompts (e.g., to invoke /devcontainer).
  *
- * ## Session creation invariants
+ * ## Session directory handling
  *
- * Every session created by this module MUST satisfy all three invariants.
- * See service/session-context.js for full documentation and rationale.
+ * POST /session?directory=X sets both session.directory (working dir) and
+ * session.projectID (derived from the git root of X). Sandbox directories
+ * are git worktrees of the parent repo — they share the same root commit,
+ * so OpenCode resolves the correct projectID automatically.
  *
- *   A. Project scoping  – session's projectID ≠ 'global' → visible in UI
- *   B. Working directory – agent operates in the worktree, not the main repo
- *   C. Session isolation – reuse never crosses PR/issue boundaries
+ * This means we always POST with the workingDirectory. No PATCH-based
+ * "project re-scoping" is needed. See test/integration/real-server.test.js
+ * for verification against a real OpenCode server.
  *
- * The SessionContext value object carries both directories together so no
- * call site can accidentally pass the wrong one. When you change session
- * creation logic, verify all three invariants in the integration tests under
- * "session creation invariants".
+ * Session isolation: worktree sessions skip findReusableSession entirely
+ * to prevent cross-PR contamination (each PR gets its own session).
  */
 
 import { execSync } from "child_process";
@@ -688,11 +688,12 @@ export async function findReusableSession(serverUrl, directory, options = {}) {
 /**
  * Create a session via the OpenCode HTTP API
  *
- * Satisfies session creation invariants A and B (see module header):
- *   A. Creates the session scoped to sessionCtx.projectDirectory so OpenCode
- *      assigns the correct projectID (session visible in desktop UI).
- *   B. Sends the first message with sessionCtx.workingDirectory so the agent
- *      operates in the worktree, not the main repo.
+ * Creates the session with sessionCtx.workingDirectory. OpenCode resolves
+ * the correct projectID from the git root of that directory — sandbox dirs
+ * (git worktrees) resolve to the same project as the parent repo, so no
+ * separate "project scoping" step is needed.
+ *
+ * Verified against real OpenCode server in test/integration/real-server.test.js.
  *
  * @param {string} serverUrl - Server URL (e.g., "http://localhost:4096")
  * @param {SessionContext} sessionCtx - Carries both directories (see session-context.js)
@@ -707,17 +708,24 @@ export async function findReusableSession(serverUrl, directory, options = {}) {
 export async function createSessionViaApi(serverUrl, sessionCtx, prompt, options = {}) {
   const fetchFn = options.fetch || fetch;
   const headerTimeout = options.headerTimeout || HEADER_TIMEOUT_MS;
-  // Invariant A: use projectDirectory so OpenCode assigns the correct projectID.
-  // Invariant B: use workingDirectory for messages so the agent operates in the worktree.
-  const projectDir = sessionCtx.projectDirectory;
+  // POST /session?directory=X sets both session.directory and projectID.
+  // OpenCode resolves projectID from the git root of X — sandbox directories
+  // (git worktrees) share the same root commit as the parent repo, so they
+  // get the correct projectID automatically. No PATCH re-scoping needed.
+  //
+  // PATCH /session/:id only updates title/archived — the ?directory param
+  // is a routing parameter (determines which project to look in), NOT a
+  // mutation of session.directory.
   const directory = sessionCtx.workingDirectory;
   
   let session = null;
   
   try {
-    // Step 1: Create session scoped to the project directory
+    // Step 1: Create session with the working directory.
+    // This is what determines where the agent actually operates (file reads,
+    // writes, tool execution). For worktree sessions this is the sandbox path.
     const sessionUrl = new URL('/session', serverUrl);
-    sessionUrl.searchParams.set('directory', projectDir);
+    sessionUrl.searchParams.set('directory', directory);
     
     const createResponse = await fetchFn(sessionUrl.toString(), {
       method: 'POST',
@@ -733,10 +741,12 @@ export async function createSessionViaApi(serverUrl, sessionCtx, prompt, options
     session = await createResponse.json();
     debug(`createSessionViaApi: created session ${session.id} in ${directory}`);
     
-    // Step 2: Update session title if provided
+    // Step 2: Set session title if provided.
+    // PATCH ?directory must match the session's directory so the server can
+    // find it (it's a routing param, not a mutation).
     if (options.title) {
       const updateUrl = new URL(`/session/${session.id}`, serverUrl);
-      updateUrl.searchParams.set('directory', projectDir);
+      updateUrl.searchParams.set('directory', directory);
       await fetchFn(updateUrl.toString(), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },

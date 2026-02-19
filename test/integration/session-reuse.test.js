@@ -564,9 +564,9 @@ describe("integration: worktree creation with worktree_name", () => {
     assert.ok(worktreeCreateCalled, "Should create worktree when worktree_name is configured");
     assert.strictEqual(createdWorktreeName, "pr-42", "Should expand worktree_name template");
     assert.ok(sessionCreated, "Should create session");
-    // Session creation uses the project directory (for correct projectID scoping)
-    // The worktree path is used for messages/commands (file operations)
-    assert.strictEqual(sessionDirectory, "/proj", "Session should be scoped to project directory");
+    // Session creation uses the worktree directory (sets actual working dir)
+    // PATCH with project dir handles UI scoping (best-effort)
+    assert.strictEqual(sessionDirectory, "/worktree/pr-42", "Session should be created with worktree as working directory");
   });
 
   it("reuses stored directory when reprocessing same item", async () => {
@@ -618,8 +618,8 @@ describe("integration: worktree creation with worktree_name", () => {
     assert.ok(result.success, "Action should succeed");
     // Should NOT create a new worktree since we have existing_directory
     assert.strictEqual(worktreeCreateCalled, false, "Should NOT create new worktree when existing_directory provided");
-    // Session creation uses the project directory (for correct projectID scoping)
-    assert.strictEqual(sessionDirectory, "/proj", "Session should be scoped to project directory");
+    // Session creation uses the worktree directory (sets actual working dir)
+    assert.strictEqual(sessionDirectory, existingWorktreeDir, "Session should be created with worktree as working directory");
   });
 
   it("skips session reuse when working in a worktree", async () => {
@@ -674,10 +674,10 @@ describe("integration: worktree creation with worktree_name", () => {
     // Should NOT query for existing sessions when in a worktree
     assert.strictEqual(sessionListQueried, false,
       "Should skip session reuse entirely when in a worktree");
-    // Should create a new session scoped to the project directory
+    // Should create a new session with the worktree as working directory
     assert.ok(sessionCreated, "Should create a new session");
-    assert.strictEqual(sessionCreateDirectory, "/proj",
-      "New session should be scoped to project directory");
+    assert.strictEqual(sessionCreateDirectory, existingWorktreeDir,
+      "New session should be created with worktree as working directory");
   });
 });
 
@@ -1032,6 +1032,10 @@ describe("session creation invariants", () => {
         calls.sessionCreateDirectory = u.searchParams.get("directory");
         calls.sessionCreated = true;
       }
+      if (method === "PATCH" && /^\/session\/[^/]+$/.test(u.pathname)) {
+        calls.patchDirectory = u.searchParams.get("directory");
+        calls.patchSessionId = u.pathname.split("/")[2];
+      }
       if (method === "GET" && u.pathname === "/session") {
         calls.sessionListQueried = true;
       }
@@ -1039,11 +1043,11 @@ describe("session creation invariants", () => {
     };
   }
 
-  it("invariant A+B: session scoped to project, message sent to worktree", async () => {
-    // This is THE test that would have caught every regression in v0.24.7–v0.24.10.
-    // It asserts both invariants simultaneously:
-    //   A. POST /session directory = project path (not worktree) → correct projectID
-    //   B. POST /session/:id/message directory = worktree path → correct working dir
+  it("session created with worktree directory, message sent to worktree", async () => {
+    // POST /session must use the worktree directory — this sets session.directory
+    // and determines where the agent operates. OpenCode derives the correct
+    // projectID from the git root (sandbox worktrees share the same root commit).
+    // Verified against a real server in test/integration/real-server.test.js.
 
     const calls = {};
 
@@ -1069,22 +1073,18 @@ describe("session creation invariants", () => {
 
     assert.ok(result.success, `Action should succeed (warning: ${result.warning || "none"})`);
 
-    // Invariant A: session creation uses the project directory
-    assert.strictEqual(calls.sessionCreateDirectory, "/proj",
-      "INVARIANT A VIOLATED: POST /session must use projectDirectory for correct projectID");
+    // Session creation uses the worktree directory
+    assert.strictEqual(calls.sessionCreateDirectory, "/worktree/pr-99",
+      "POST /session must use workingDirectory so agent operates in worktree");
 
-    // Invariant B: message uses the worktree directory
+    // Message also uses the worktree directory
     assert.strictEqual(calls.messageDirectory, "/worktree/pr-99",
-      "INVARIANT B VIOLATED: POST /message must use workingDirectory for correct file operations");
-
-    // Sanity: the two directories must be different in the worktree case
-    assert.notStrictEqual(calls.sessionCreateDirectory, calls.messageDirectory,
-      "In worktree mode, session creation dir and message dir must differ");
+      "POST /message must use workingDirectory for correct file operations");
   });
 
-  it("invariant A+B hold when reprocessing with existing_directory", async () => {
+  it("reprocessing uses existing worktree directory for session and message", async () => {
     // When reprocessing an item (e.g., new feedback on a PR), the existing worktree
-    // directory is passed. The same invariants must still hold.
+    // directory is passed. Session creation and messages must both use it.
 
     const calls = {};
 
@@ -1111,13 +1111,13 @@ describe("session creation invariants", () => {
 
     assert.ok(result.success, `Action should succeed (warning: ${result.warning || "none"})`);
 
-    // Invariant A: session creation uses the project directory, not the worktree
-    assert.strictEqual(calls.sessionCreateDirectory, "/proj",
-      "INVARIANT A VIOLATED: reprocessing must still use projectDirectory for POST /session");
+    // Session creation uses the existing worktree directory
+    assert.strictEqual(calls.sessionCreateDirectory, "/worktree/calm-wizard",
+      "POST /session must use workingDirectory for correct session directory");
 
-    // Invariant B: message uses the existing worktree directory
+    // Message uses the existing worktree directory
     assert.strictEqual(calls.messageDirectory, "/worktree/calm-wizard",
-      "INVARIANT B VIOLATED: reprocessing must send messages to the existing worktree path");
+      "POST /message must use workingDirectory for correct file operations");
   });
 
   it("invariant C: second PR in same project gets its own session", async () => {
