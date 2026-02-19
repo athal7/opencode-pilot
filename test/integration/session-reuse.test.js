@@ -564,9 +564,9 @@ describe("integration: worktree creation with worktree_name", () => {
     assert.ok(worktreeCreateCalled, "Should create worktree when worktree_name is configured");
     assert.strictEqual(createdWorktreeName, "pr-42", "Should expand worktree_name template");
     assert.ok(sessionCreated, "Should create session");
-    // Session creation uses the worktree directory (sets working directory)
-    // The PATCH with project directory re-associates it with the correct project
-    assert.strictEqual(sessionDirectory, "/worktree/pr-42", "Session should be created in worktree directory");
+    // Session creation uses the project directory (for correct projectID scoping)
+    // The worktree path is used for messages/commands (file operations)
+    assert.strictEqual(sessionDirectory, "/proj", "Session should be scoped to project directory");
   });
 
   it("reuses stored directory when reprocessing same item", async () => {
@@ -618,8 +618,8 @@ describe("integration: worktree creation with worktree_name", () => {
     assert.ok(result.success, "Action should succeed");
     // Should NOT create a new worktree since we have existing_directory
     assert.strictEqual(worktreeCreateCalled, false, "Should NOT create new worktree when existing_directory provided");
-    // Session creation uses the existing worktree directory (sets working directory)
-    assert.strictEqual(sessionDirectory, existingWorktreeDir, "Session should be created in existing worktree directory");
+    // Session creation uses the project directory (for correct projectID scoping)
+    assert.strictEqual(sessionDirectory, "/proj", "Session should be scoped to project directory");
   });
 
   it("skips session reuse when working in a worktree", async () => {
@@ -631,7 +631,6 @@ describe("integration: worktree creation with worktree_name", () => {
     let sessionListQueried = false;
     let sessionCreated = false;
     let sessionCreateDirectory = null;
-    let patchDirectory = null;
     
     const existingWorktreeDir = "/worktree/calm-wizard";
     
@@ -655,10 +654,7 @@ describe("integration: worktree creation with worktree_name", () => {
         sessionCreateDirectory = req.query?.directory;
         return { body: { id: "ses_new" } };
       },
-      "PATCH /session/ses_new": (req) => {
-        patchDirectory = req.query?.directory;
-        return { body: {} };
-      },
+      "PATCH /session/ses_new": () => ({ body: {} }),
       "POST /session/ses_new/message": () => ({ body: { success: true } }),
       "POST /session/ses_new/command": () => ({ body: { success: true } }),
     });
@@ -678,13 +674,10 @@ describe("integration: worktree creation with worktree_name", () => {
     // Should NOT query for existing sessions when in a worktree
     assert.strictEqual(sessionListQueried, false,
       "Should skip session reuse entirely when in a worktree");
-    // Should create a new session with the worktree directory (correct working dir)
+    // Should create a new session scoped to the project directory
     assert.ok(sessionCreated, "Should create a new session");
-    assert.strictEqual(sessionCreateDirectory, existingWorktreeDir,
-      "Session should be created in worktree directory");
-    // PATCH re-associates the session with the correct project
-    assert.strictEqual(patchDirectory, "/proj",
-      "PATCH should use project directory for correct project scoping");
+    assert.strictEqual(sessionCreateDirectory, "/proj",
+      "New session should be scoped to project directory");
   });
 });
 
@@ -972,5 +965,277 @@ describe("integration: stacked PR session reuse", () => {
     } finally {
       rmSyncFs(tempDir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Session creation invariants
+ *
+ * These tests encode the three correctness requirements for every session
+ * created by pilot. They assert OUTCOMES (which directory was used for which
+ * API call), not implementation details (which function was called or how
+ * parameters were threaded).
+ *
+ * DO NOT CHANGE these tests when refactoring session creation internals.
+ * They should only change if the desired behavior changes.
+ *
+ * See service/session-context.js for the full invariant documentation.
+ *
+ *   A. Project scoping  – POST /session uses projectDirectory
+ *   B. Working directory – messages use workingDirectory (the worktree path)
+ *   C. Session isolation – worktree sessions are never reused across PRs
+ *
+ * Implementation note: these tests use a fetch interceptor (options.fetch)
+ * to capture which URL parameters were used for each API call. This is more
+ * reliable than reading the directory inside the mock server's request
+ * handler, because the AbortController in createSessionViaApi aborts the
+ * connection after receiving response headers — which can race with the mock
+ * server's body-buffering. The interceptor captures the URL synchronously
+ * before the request is sent, avoiding the race entirely.
+ */
+describe("session creation invariants", () => {
+  let mockServer;
+
+  afterEach(async () => {
+    if (mockServer) {
+      await mockServer.close();
+      mockServer = null;
+    }
+  });
+
+  /**
+   * Build a fetch interceptor that records which directory was used for
+   * POST /session (session creation) and POST /session/:id/message or
+   * POST /session/:id/command (message delivery), then forwards to the
+   * real mock server.
+   */
+  function makeFetchInterceptor(calls) {
+    return async (url, opts) => {
+      const u = new URL(url);
+      const method = opts?.method || "GET";
+
+      // Short-circuit message/command: return mock 200 directly.
+      // The AbortController in sendMessageToSession/createSessionViaApi aborts
+      // the connection after response headers arrive, which races with the mock
+      // server's body-buffering (req.on("end") never fires). Returning a
+      // synthetic Response here avoids the race entirely.
+      if (method === "POST" && /^\/session\/[^/]+\/(message|command)$/.test(u.pathname)) {
+        calls.messageDirectory = u.searchParams.get("directory");
+        calls.messageSessionId = u.pathname.split("/")[2];
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (method === "POST" && u.pathname === "/session") {
+        calls.sessionCreateDirectory = u.searchParams.get("directory");
+        calls.sessionCreated = true;
+      }
+      if (method === "GET" && u.pathname === "/session") {
+        calls.sessionListQueried = true;
+      }
+      return fetch(url, opts);
+    };
+  }
+
+  it("invariant A+B: session scoped to project, message sent to worktree", async () => {
+    // This is THE test that would have caught every regression in v0.24.7–v0.24.10.
+    // It asserts both invariants simultaneously:
+    //   A. POST /session directory = project path (not worktree) → correct projectID
+    //   B. POST /session/:id/message directory = worktree path → correct working dir
+
+    const calls = {};
+
+    mockServer = await createMockServer({
+      "GET /project": () => ({
+        body: [{ id: "proj_1", worktree: "/proj", sandboxes: [], time: { created: 1 } }],
+      }),
+      "GET /experimental/worktree": () => ({ body: [] }),
+      "POST /experimental/worktree": (req) => ({
+        body: { name: req.body?.name, directory: `/worktree/${req.body?.name}` },
+      }),
+      "GET /session": () => ({ body: [] }),
+      "GET /session/status": () => ({ body: {} }),
+      "POST /session": () => ({ body: { id: "ses_inv" } }),
+      "PATCH /session/ses_inv": () => ({ body: {} }),
+    });
+
+    const result = await executeAction(
+      { number: 99, title: "Invariant test PR" },
+      { path: "/proj", prompt: "review", worktree_name: "pr-{number}" },
+      { discoverServer: async () => mockServer.url, fetch: makeFetchInterceptor(calls) }
+    );
+
+    assert.ok(result.success, `Action should succeed (warning: ${result.warning || "none"})`);
+
+    // Invariant A: session creation uses the project directory
+    assert.strictEqual(calls.sessionCreateDirectory, "/proj",
+      "INVARIANT A VIOLATED: POST /session must use projectDirectory for correct projectID");
+
+    // Invariant B: message uses the worktree directory
+    assert.strictEqual(calls.messageDirectory, "/worktree/pr-99",
+      "INVARIANT B VIOLATED: POST /message must use workingDirectory for correct file operations");
+
+    // Sanity: the two directories must be different in the worktree case
+    assert.notStrictEqual(calls.sessionCreateDirectory, calls.messageDirectory,
+      "In worktree mode, session creation dir and message dir must differ");
+  });
+
+  it("invariant A+B hold when reprocessing with existing_directory", async () => {
+    // When reprocessing an item (e.g., new feedback on a PR), the existing worktree
+    // directory is passed. The same invariants must still hold.
+
+    const calls = {};
+
+    mockServer = await createMockServer({
+      "GET /project": () => ({
+        body: [{ id: "proj_1", worktree: "/proj", sandboxes: [], time: { created: 1 } }],
+      }),
+      "GET /session": () => ({ body: [] }),
+      "GET /session/status": () => ({ body: {} }),
+      "POST /session": () => ({ body: { id: "ses_reprocess_inv" } }),
+      "PATCH /session/ses_reprocess_inv": () => ({ body: {} }),
+    });
+
+    const result = await executeAction(
+      { number: 42, title: "Reprocessed PR" },
+      {
+        path: "/proj",
+        prompt: "review",
+        worktree_name: "pr-{number}",
+        existing_directory: "/worktree/calm-wizard",
+      },
+      { discoverServer: async () => mockServer.url, fetch: makeFetchInterceptor(calls) }
+    );
+
+    assert.ok(result.success, `Action should succeed (warning: ${result.warning || "none"})`);
+
+    // Invariant A: session creation uses the project directory, not the worktree
+    assert.strictEqual(calls.sessionCreateDirectory, "/proj",
+      "INVARIANT A VIOLATED: reprocessing must still use projectDirectory for POST /session");
+
+    // Invariant B: message uses the existing worktree directory
+    assert.strictEqual(calls.messageDirectory, "/worktree/calm-wizard",
+      "INVARIANT B VIOLATED: reprocessing must send messages to the existing worktree path");
+  });
+
+  it("invariant C: second PR in same project gets its own session", async () => {
+    // Two PRs in the same project (/proj). PR #1 already has an active session.
+    // PR #2 works in a different worktree. Session reuse must NOT return PR #1's
+    // session — each PR must get its own session.
+
+    const calls = { sessionListQueried: false, sessionCreated: false };
+
+    mockServer = await createMockServer({
+      "GET /project": () => ({
+        body: [{ id: "proj_1", worktree: "/proj", sandboxes: [], time: { created: 1 } }],
+      }),
+      "GET /experimental/worktree": () => ({ body: ["/worktree/pr-200"] }),
+      "GET /session": () => ({
+        // Return PR #1's session — this should NOT be reused for PR #2
+        body: [{ id: "ses_pr1", time: { created: 1, updated: 2 } }],
+      }),
+      "GET /session/status": () => ({ body: { ses_pr1: { type: "idle" } } }),
+      "POST /session": () => ({ body: { id: "ses_pr2" } }),
+      "PATCH /session/ses_pr2": () => ({ body: {} }),
+    });
+
+    const result = await executeAction(
+      { number: 200, title: "PR #200" },
+      {
+        path: "/proj",
+        prompt: "review",
+        worktree_name: "pr-{number}",
+        existing_directory: "/worktree/pr-200",
+      },
+      { discoverServer: async () => mockServer.url, fetch: makeFetchInterceptor(calls) }
+    );
+
+    assert.ok(result.success, `Action should succeed (warning: ${result.warning || "none"})`);
+
+    // Invariant C: session reuse is skipped entirely when in a worktree
+    assert.strictEqual(calls.sessionListQueried, false,
+      "INVARIANT C VIOLATED: worktree sessions must not query for reusable sessions");
+
+    // A new session must be created for this PR
+    assert.ok(calls.sessionCreated,
+      "INVARIANT C VIOLATED: each worktree PR must get its own new session");
+
+    // The returned session must be the new one, not PR #1's
+    assert.strictEqual(result.sessionId, "ses_pr2",
+      "INVARIANT C VIOLATED: result must reference the newly created session, not PR #1's");
+  });
+
+  it("invariant C exception: non-worktree sessions ARE reused", async () => {
+    // Session reuse should still work for items NOT running in a worktree.
+    // A non-worktree item (path == cwd) should find and reuse an existing session.
+
+    const calls = { sessionListQueried: false, sessionCreated: false };
+
+    mockServer = await createMockServer({
+      "GET /project": () => ({
+        body: [{ id: "proj_1", worktree: "/proj", sandboxes: [], time: { created: 1 } }],
+      }),
+      "GET /session": () => ({
+        body: [{ id: "ses_existing", time: { created: 1, updated: 2 } }],
+      }),
+      "GET /session/status": () => ({ body: { ses_existing: { type: "idle" } } }),
+      "POST /session": () => ({ body: { id: "ses_should_not_create" } }),
+      "PATCH /session/ses_existing": () => ({ body: {} }),
+    });
+
+    const result = await executeAction(
+      { number: 1, title: "Non-worktree item" },
+      {
+        path: "/proj",
+        prompt: "review",
+        // No worktree_name, no existing_directory → non-worktree mode
+      },
+      { discoverServer: async () => mockServer.url, fetch: makeFetchInterceptor(calls) }
+    );
+
+    assert.ok(result.success, `Action should succeed (warning: ${result.warning || "none"})`);
+
+    // Non-worktree: session reuse SHOULD work
+    assert.ok(calls.sessionListQueried,
+      "Non-worktree items should query for reusable sessions");
+    assert.strictEqual(calls.sessionCreated, false,
+      "Should reuse existing session, not create a new one");
+    assert.strictEqual(result.sessionId, "ses_existing",
+      "Should return the reused session ID");
+    assert.ok(result.sessionReused,
+      "Should flag the session as reused");
+  });
+
+  it("invariants A+B hold for non-worktree sessions (degenerate case)", async () => {
+    // When there is no worktree, both directories are the same.
+    // POST /session and POST /message should both use the project directory.
+
+    const calls = {};
+
+    mockServer = await createMockServer({
+      "GET /project": () => ({
+        body: [{ id: "proj_1", worktree: "/proj", sandboxes: [], time: { created: 1 } }],
+      }),
+      "GET /session": () => ({ body: [] }),
+      "GET /session/status": () => ({ body: {} }),
+      "POST /session": () => ({ body: { id: "ses_nwt" } }),
+      "PATCH /session/ses_nwt": () => ({ body: {} }),
+    });
+
+    const result = await executeAction(
+      { number: 1, title: "No worktree" },
+      { path: "/proj", prompt: "review" },
+      { discoverServer: async () => mockServer.url, fetch: makeFetchInterceptor(calls) }
+    );
+
+    assert.ok(result.success, `Action should succeed (warning: ${result.warning || "none"})`);
+
+    // Both should be the project directory when no worktree is involved
+    assert.strictEqual(calls.sessionCreateDirectory, "/proj",
+      "Non-worktree: session creation should use project directory");
+    assert.strictEqual(calls.messageDirectory, "/proj",
+      "Non-worktree: message should use project directory");
   });
 });

@@ -3,6 +3,20 @@
  *
  * Starts OpenCode sessions with configurable prompts.
  * Supports prompt_template for custom prompts (e.g., to invoke /devcontainer).
+ *
+ * ## Session creation invariants
+ *
+ * Every session created by this module MUST satisfy all three invariants.
+ * See service/session-context.js for full documentation and rationale.
+ *
+ *   A. Project scoping  – session's projectID ≠ 'global' → visible in UI
+ *   B. Working directory – agent operates in the worktree, not the main repo
+ *   C. Session isolation – reuse never crosses PR/issue boundaries
+ *
+ * The SessionContext value object carries both directories together so no
+ * call site can accidentally pass the wrong one. When you change session
+ * creation logic, verify all three invariants in the integration tests under
+ * "session creation invariants".
  */
 
 import { execSync } from "child_process";
@@ -11,6 +25,7 @@ import { debug } from "./logger.js";
 import { getNestedValue } from "./utils.js";
 import { getServerPort } from "./repo-config.js";
 import { resolveWorktreeDirectory, getProjectInfo, getProjectInfoForDirectory } from "./worktree.js";
+import { SessionContext } from "./session-context.js";
 import path from "path";
 import os from "os";
 
@@ -672,32 +687,37 @@ export async function findReusableSession(serverUrl, directory, options = {}) {
 
 /**
  * Create a session via the OpenCode HTTP API
- * 
+ *
+ * Satisfies session creation invariants A and B (see module header):
+ *   A. Creates the session scoped to sessionCtx.projectDirectory so OpenCode
+ *      assigns the correct projectID (session visible in desktop UI).
+ *   B. Sends the first message with sessionCtx.workingDirectory so the agent
+ *      operates in the worktree, not the main repo.
+ *
  * @param {string} serverUrl - Server URL (e.g., "http://localhost:4096")
- * @param {string} directory - Working directory for file operations (may be a worktree)
+ * @param {SessionContext} sessionCtx - Carries both directories (see session-context.js)
  * @param {string} prompt - The prompt/message to send
  * @param {object} [options] - Options
- * @param {string} [options.projectDirectory] - Project directory for session scoping (defaults to directory)
  * @param {string} [options.title] - Session title
  * @param {string} [options.agent] - Agent to use
  * @param {string} [options.model] - Model to use
  * @param {function} [options.fetch] - Custom fetch function (for testing)
  * @returns {Promise<object>} Result with sessionId, success, error
  */
-export async function createSessionViaApi(serverUrl, directory, prompt, options = {}) {
+export async function createSessionViaApi(serverUrl, sessionCtx, prompt, options = {}) {
   const fetchFn = options.fetch || fetch;
   const headerTimeout = options.headerTimeout || HEADER_TIMEOUT_MS;
-  const projectDir = options.projectDirectory || directory;
+  // Invariant A: use projectDirectory so OpenCode assigns the correct projectID.
+  // Invariant B: use workingDirectory for messages so the agent operates in the worktree.
+  const projectDir = sessionCtx.projectDirectory;
+  const directory = sessionCtx.workingDirectory;
   
   let session = null;
   
   try {
-    // Step 1: Create session with the working directory (may be a worktree).
-    // This sets the session's working directory so the agent operates in the
-    // correct location. For worktree sessions, the server may assign
-    // projectID 'global' since sandbox paths don't match project worktrees.
+    // Step 1: Create session scoped to the project directory
     const sessionUrl = new URL('/session', serverUrl);
-    sessionUrl.searchParams.set('directory', directory);
+    sessionUrl.searchParams.set('directory', projectDir);
     
     const createResponse = await fetchFn(sessionUrl.toString(), {
       method: 'POST',
@@ -713,20 +733,14 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
     session = await createResponse.json();
     debug(`createSessionViaApi: created session ${session.id} in ${directory}`);
     
-    // Step 2: Update session - always PATCH with project directory when it
-    // differs from the working directory (worktree case). This re-associates
-    // the session with the correct project so it appears in the UI.
-    // Also set the title if provided.
-    const needsProjectScoping = projectDir !== directory;
-    if (options.title || needsProjectScoping) {
+    // Step 2: Update session title if provided
+    if (options.title) {
       const updateUrl = new URL(`/session/${session.id}`, serverUrl);
       updateUrl.searchParams.set('directory', projectDir);
-      const patchBody = {};
-      if (options.title) patchBody.title = options.title;
       await fetchFn(updateUrl.toString(), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patchBody),
+        body: JSON.stringify({ title: options.title }),
       });
     }
     
@@ -839,17 +853,25 @@ export async function createSessionViaApi(serverUrl, directory, prompt, options 
 }
 
 /**
- * Execute session creation/reuse in a specific directory
- * Internal helper for executeAction - handles prompt building, session reuse, and API calls
- * 
+ * Execute session creation/reuse for the given session context.
+ * Internal helper for executeAction - handles prompt building, session reuse, and API calls.
+ *
+ * Enforces invariant C (session isolation): session reuse is skipped entirely
+ * when sessionCtx.isWorktree is true. Each PR/issue running in a worktree must
+ * get its own session because:
+ *   - Querying by workingDirectory finds old sessions with projectID='global'
+ *   - Querying by projectDirectory finds sessions for unrelated PRs in the same project
+ *
  * @param {string} serverUrl - OpenCode server URL
- * @param {string} cwd - Working directory for the session
+ * @param {SessionContext} sessionCtx - Carries both directories
  * @param {object} item - Item to create session for
  * @param {object} config - Repo config with action settings
  * @param {object} [options] - Execution options
  * @returns {Promise<object>} Result with command, success, sessionId, etc.
  */
-async function executeInDirectory(serverUrl, cwd, item, config, options = {}, projectDirectory = null) {
+async function executeInDirectory(serverUrl, sessionCtx, item, config, options = {}) {
+  const cwd = sessionCtx.workingDirectory;
+
   // Build prompt from template
   const prompt = buildPromptFromTemplate(config.prompt || "default", item);
   
@@ -889,15 +911,12 @@ async function executeInDirectory(serverUrl, cwd, item, config, options = {}, pr
     }
   }
   
-  // Check if we should try to reuse an existing session.
-  // Skip reuse when working in a worktree (projectDirectory differs from cwd),
-  // because querying by worktree dir finds old sessions with projectID "global",
-  // and querying by project dir finds unrelated sessions for other PRs.
-  // Each worktree should get its own correctly-scoped session.
+  // Invariant C: skip findReusableSession when in a worktree.
+  // Each worktree (= each PR/issue) must get its own session to prevent
+  // cross-PR contamination. See session-context.js for full rationale.
   const reuseActiveSession = config.reuse_active_session !== false; // default true
-  const inWorktree = projectDirectory && projectDirectory !== cwd;
   
-  if (reuseActiveSession && !inWorktree && !options.dryRun) {
+  if (reuseActiveSession && !sessionCtx.isWorktree && !options.dryRun) {
     const existingSession = await findReusableSession(serverUrl, cwd, { fetch: options.fetch });
     
     if (existingSession) {
@@ -934,8 +953,7 @@ async function executeInDirectory(serverUrl, cwd, item, config, options = {}, pr
     };
   }
   
-  const result = await createSessionViaApi(serverUrl, cwd, prompt, {
-    projectDirectory: projectDirectory || cwd,
+  const result = await createSessionViaApi(serverUrl, sessionCtx, prompt, {
     title: sessionTitle,
     agent: config.agent,
     model: config.model,
@@ -994,27 +1012,29 @@ export async function executeAction(item, config, options = {}) {
     };
   }
   
-  // If existing_directory is provided (reprocessing same item), use it directly
-  // This preserves the worktree from the previous run even if its name doesn't match the template
+  // If existing_directory is provided (reprocessing same item), use it directly.
+  // This preserves the worktree from the previous run even if its name doesn't match the template.
+  // Build a worktree SessionContext since existing_directory is a worktree path.
   if (config.existing_directory) {
     debug(`executeAction: using existing_directory=${config.existing_directory}`);
     const cwd = expandPath(config.existing_directory);
-    return await executeInDirectory(serverUrl, cwd, item, config, options, baseCwd);
+    const sessionCtx = SessionContext.forWorktree(baseCwd, cwd);
+    return await executeInDirectory(serverUrl, sessionCtx, item, config, options);
   }
   
-  // Resolve worktree directory if configured
-  // This allows creating sessions in isolated worktrees instead of the main project
+  // Resolve worktree directory if configured.
+  // This allows creating sessions in isolated worktrees instead of the main project.
   let worktreeMode = config.worktree;
   
-  // If worktree_name is configured, enable worktree mode (explicit configuration)
-  // This allows presets to specify worktree isolation without requiring existing sandboxes
+  // If worktree_name is configured, enable worktree mode (explicit configuration).
+  // This allows presets to specify worktree isolation without requiring existing sandboxes.
   if (!worktreeMode && config.worktree_name) {
     debug(`executeAction: worktree_name configured, enabling worktree mode`);
     worktreeMode = 'new';
   }
   
-  // Auto-detect worktree support: check if the project has sandboxes
-  // This is a fallback for when worktree isn't explicitly configured
+  // Auto-detect worktree support: check if the project has sandboxes.
+  // This is a fallback for when worktree isn't explicitly configured.
   if (!worktreeMode) {
     // Look up project info for this specific directory (not just /project/current)
     const projectInfo = await getProjectInfoForDirectory(serverUrl, baseCwd, { fetch: options.fetch });
@@ -1051,5 +1071,8 @@ export async function executeAction(item, config, options = {}) {
   
   debug(`executeAction: using cwd=${cwd}`);
   
-  return await executeInDirectory(serverUrl, cwd, item, config, options, baseCwd);
+  // Build a SessionContext so downstream functions always have both directories.
+  // forWorktree correctly sets isWorktree=true when cwd differs from baseCwd.
+  const sessionCtx = SessionContext.forWorktree(baseCwd, cwd);
+  return await executeInDirectory(serverUrl, sessionCtx, item, config, options);
 }

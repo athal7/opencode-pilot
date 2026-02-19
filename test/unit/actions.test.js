@@ -7,6 +7,7 @@ import assert from 'node:assert';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
+import { SessionContext } from '../../service/session-context.js';
 
 describe('actions.js', () => {
   let tempDir;
@@ -981,9 +982,9 @@ Check for bugs and security issues.`;
       // Should NOT call worktree endpoints when existing_directory is provided
       assert.strictEqual(worktreeListCalled, false, 'Should NOT list worktrees');
       assert.strictEqual(worktreeCreateCalled, false, 'Should NOT create worktree');
-      // Session creation uses the worktree directory (sets correct working directory)
-      assert.strictEqual(sessionDirectory, '/data/worktree/calm-wizard', 
-        'Session creation should use worktree directory for correct working dir');
+      // Session creation uses project directory (for correct projectID scoping)
+      assert.strictEqual(sessionDirectory, '/data/proj', 
+        'Session creation should use project directory, not worktree');
       // Result directory is the worktree (where file operations happen)
       assert.strictEqual(result.directory, '/data/worktree/calm-wizard',
         'Result should include worktree directory');
@@ -1026,7 +1027,7 @@ Check for bugs and security issues.`;
       
       const result = await createSessionViaApi(
         'http://localhost:4096',
-        '/path/to/project',
+        SessionContext.forProject('/path/to/project'),
         'Fix the bug',
         { fetch: mockFetch }
       );
@@ -1042,12 +1043,11 @@ Check for bugs and security issues.`;
       assert.ok(messageUrl.includes('%2Fpath%2Fto%2Fproject'), 'Message URL should include encoded directory path');
     });
 
-    test('creates session with worktree directory, patches with project directory for scoping', async () => {
+    test('uses projectDirectory for session creation, working directory for messages', async () => {
       const { createSessionViaApi } = await import('../../service/actions.js');
       
       const mockSessionId = 'ses_test_proj';
       let createUrl = null;
-      let patchUrl = null;
       let messageUrl = null;
       
       const mockFetch = async (url, opts) => {
@@ -1056,11 +1056,6 @@ Check for bugs and security issues.`;
         if (urlObj.pathname === '/session' && opts?.method === 'POST') {
           createUrl = url;
           return { ok: true, json: async () => ({ id: mockSessionId }) };
-        }
-        
-        if (urlObj.pathname.includes(`/session/${mockSessionId}`) && opts?.method === 'PATCH') {
-          patchUrl = url;
-          return { ok: true, json: async () => ({}) };
         }
         
         if (urlObj.pathname.includes('/message') && opts?.method === 'POST') {
@@ -1073,26 +1068,21 @@ Check for bugs and security issues.`;
       
       await createSessionViaApi(
         'http://localhost:4096',
-        '/home/user/.local/share/opencode/worktree/abc123/pr-415',
+        SessionContext.forWorktree(
+          '/home/user/code/odin',
+          '/home/user/.local/share/opencode/worktree/abc123/pr-415'
+        ),
         'Fix the bug',
-        { 
-          fetch: mockFetch,
-          projectDirectory: '/home/user/code/odin',
-        }
+        { fetch: mockFetch }
       );
       
-      // Session creation should use the worktree directory (sets working directory)
-      assert.ok(createUrl.includes('worktree'), 
-        'Session creation should use the worktree path');
-      assert.ok(createUrl.includes('pr-415'), 
-        'Session creation should use the worktree path');
+      // Session creation should use the project directory (for correct projectID scoping)
+      assert.ok(createUrl.includes('%2Fhome%2Fuser%2Fcode%2Fodin'), 
+        'Session creation should use projectDirectory');
+      assert.ok(!createUrl.includes('worktree'), 
+        'Session creation should NOT use the worktree path');
       
-      // PATCH should use the project directory (re-associates with correct project)
-      assert.ok(patchUrl, 'PATCH should be called for project scoping');
-      assert.ok(patchUrl.includes('%2Fhome%2Fuser%2Fcode%2Fodin'), 
-        'PATCH should use projectDirectory for project scoping');
-      
-      // Message should use the working directory (worktree)
+      // Message should use the working directory (for file operations in the worktree)
       assert.ok(messageUrl.includes('worktree'), 
         'Message should use the worktree working directory');
       assert.ok(messageUrl.includes('pr-415'), 
@@ -1110,7 +1100,7 @@ Check for bugs and security issues.`;
       
       const result = await createSessionViaApi(
         'http://localhost:4096',
-        '/path/to/project',
+        SessionContext.forProject('/path/to/project'),
         'Fix the bug',
         { fetch: mockFetch }
       );
@@ -1152,7 +1142,7 @@ Check for bugs and security issues.`;
       
       await createSessionViaApi(
         'http://localhost:4096',
-        '/path/to/project',
+        SessionContext.forProject('/path/to/project'),
         'Fix the bug',
         { 
           fetch: mockFetch,
@@ -1197,7 +1187,7 @@ Check for bugs and security issues.`;
       
       const result = await createSessionViaApi(
         'http://localhost:4096',
-        '/path/to/project',
+        SessionContext.forProject('/path/to/project'),
         'Fix the bug',
         { fetch: mockFetch }
       );
@@ -1256,7 +1246,7 @@ Check for bugs and security issues.`;
       
       const result = await createSessionViaApi(
         'http://localhost:4096',
-        '/path/to/project',
+        SessionContext.forProject('/path/to/project'),
         '/review https://github.com/org/repo/pull/123',
         { fetch: mockFetch }
       );
@@ -1309,7 +1299,7 @@ Check for bugs and security issues.`;
       
       const result = await createSessionViaApi(
         'http://localhost:4096',
-        '/path/to/project',
+        SessionContext.forProject('/path/to/project'),
         'Fix the bug in the login page',
         { fetch: mockFetch }
       );
@@ -1360,7 +1350,7 @@ Check for bugs and security issues.`;
       
       const result = await createSessionViaApi(
         'http://localhost:4096',
-        '/path/to/project',
+        SessionContext.forProject('/path/to/project'),
         'Fix the bug',
         { fetch: mockFetch, title: 'Test Session', headerTimeout: 100 }
       );
@@ -1407,7 +1397,7 @@ Check for bugs and security issues.`;
       
       const result = await createSessionViaApi(
         'http://localhost:4096',
-        '/path/to/project',
+        SessionContext.forProject('/path/to/project'),
         'Fix the bug',
         { fetch: mockFetch }
       );
