@@ -60,7 +60,7 @@ function loadProviderData(provider) {
  */
 function buildPresetsRegistry() {
   const registry = {};
-  const providers = ["github", "linear"];
+  const providers = ["github", "linear", "jira"];
   
   for (const provider of providers) {
     const { presets } = loadProviderData(provider);

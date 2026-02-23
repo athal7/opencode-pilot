@@ -1,0 +1,27 @@
+# Jira source presets
+
+# Provider-level config (applies to all Jira presets)
+_provider:
+  mappings:
+    title: fields.summary
+    number: key
+    state: fields.status.name
+    updated_at: fields.updated
+  # Reprocess items when state changes (e.g., reopened, status transitions)
+  # Note: updated_at is NOT included because our own changes would trigger reprocessing
+  reprocess_on:
+    - state       # Detect status changes (Done -> In Progress, etc.)
+
+# Presets
+my-issues:
+  name: jira-my-issues
+  tool:
+    mcp: mcp-atlassian
+    name: jira_search
+  args:
+    jql: "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC"
+  item:
+    id: "jira:{key}"
+  worktree_name: "{key}"
+  session:
+    name: "{fields.summary}"

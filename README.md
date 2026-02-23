@@ -76,8 +76,70 @@ Three ways to configure sources, from simplest to most flexible:
 - `github/review-requests` - PRs needing my review
 - `github/my-prs-attention` - My PRs needing attention (conflicts OR human feedback)
 - `linear/my-issues` - Linear tickets (requires `teamId`, `assigneeId`)
+- `jira/my-issues` - Jira Cloud issues (requires personal API token)
 
 Session names for `my-prs-attention` indicate the condition: "Conflicts: {title}", "Feedback: {title}", or "Conflicts+Feedback: {title}".
+
+### Jira Cloud Setup
+
+The `jira/my-issues` preset polls Jira Cloud for issues assigned to you. It uses the `mcp-atlassian` MCP server with the `jira_search` tool.
+
+#### API Token Authentication
+
+Jira Cloud requires a personal API token for authentication. Passwords are no longer supported.
+
+1. Generate an API token at [Atlassian Account Security](https://id.atlassian.com/manage/api-tokens)
+2. Copy the token (you won't see it again)
+3. Configure the `mcp-atlassian` MCP server with your email and token
+
+The MCP server handles authentication using your email address as the username and the API token as the password. This approach is more secure than using your account password.
+
+> **Note**: OAuth 2.0 (3LO) and Jira Server/Data Center are out of scope for this v1 feature.
+
+#### Configuration
+
+Using the preset in your config:
+
+```yaml
+sources:
+  - preset: jira/my-issues
+```
+
+The preset uses the default MCP contract:
+- **MCP server**: `mcp-atlassian`
+- **Tool**: `jira_search`
+- **Default JQL**: `assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC`
+
+This query finds issues assigned to you, filters out completed work, and prioritizes recently updated items.
+
+#### Custom JQL Queries
+
+Customize the JQL query by using the full syntax instead of the preset:
+
+```yaml
+sources:
+  - tool:
+      mcp: mcp-atlassian
+      name: jira_search
+    args:
+      jql: "project = MYPROJECT AND priority in (High, Critical) AND assignee = currentUser()"
+```
+
+Use JQL to match your workflow, filter by project, priority, labels, or any other Jira field.
+
+#### Alternative MCP Servers
+
+If your Jira MCP server uses a different name, override the default contract:
+
+```yaml
+sources:
+  - preset: jira/my-issues
+    tool:
+      mcp: your-jira-mcp-server
+      name: your_jira_search_tool
+```
+
+This ensures pilot connects to your MCP server using the correct server and tool names.
 
 ### Prompt Templates
 

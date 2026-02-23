@@ -495,6 +495,24 @@ sources: []
       assert.strictEqual(toolConfig.mappings.body, 'title');
       assert.strictEqual(toolConfig.mappings.number, 'url:/([A-Z0-9]+-[0-9]+)/');
     });
+    test('getToolProviderConfig falls back to jira preset provider config', async () => {
+      writeFileSync(configPath, `
+sources: []
+`);
+
+      const { loadRepoConfig, getToolProviderConfig } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      
+      // Jira preset has provider config with mappings and reprocess_on
+      const toolConfig = getToolProviderConfig('jira');
+      
+      assert.strictEqual(toolConfig.mappings.title, 'fields.summary');
+      assert.strictEqual(toolConfig.mappings.number, 'key');
+      assert.strictEqual(toolConfig.mappings.state, 'fields.status.name');
+      assert.strictEqual(toolConfig.mappings.updated_at, 'fields.updated');
+      assert.ok(Array.isArray(toolConfig.reprocess_on));
+      assert.ok(toolConfig.reprocess_on.includes('state'));
+    });
 
     test('getToolProviderConfig merges user config with preset defaults', async () => {
       writeFileSync(configPath, `
@@ -517,8 +535,33 @@ sources: []
       assert.strictEqual(toolConfig.mappings.body, 'title');
       assert.strictEqual(toolConfig.mappings.custom_field, 'some_source');
     });
+    test('getToolProviderConfig merges user jira config with preset defaults', async () => {
+      writeFileSync(configPath, `
+tools:
+  jira:
+    mappings:
+      priority: fields.priority.name
+
+sources: []
+`);
+
+      const { loadRepoConfig, getToolProviderConfig } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      
+      const toolConfig = getToolProviderConfig('jira');
+      
+      // Should have preset mappings plus user mappings
+      assert.strictEqual(toolConfig.mappings.title, 'fields.summary');
+      assert.strictEqual(toolConfig.mappings.number, 'key');
+      assert.strictEqual(toolConfig.mappings.state, 'fields.status.name');
+      assert.strictEqual(toolConfig.mappings.updated_at, 'fields.updated');
+      assert.strictEqual(toolConfig.mappings.priority, 'fields.priority.name');
+      // Should have preset reprocess_on
+      assert.ok(Array.isArray(toolConfig.reprocess_on));
+      assert.ok(toolConfig.reprocess_on.includes('state'));
   });
 
+    });
   describe('repo resolution for sources', () => {
     test('resolves repo from simple field reference', async () => {
       writeFileSync(configPath, `
@@ -718,6 +761,23 @@ sources:
       assert.deepStrictEqual(sources[0].tool, { mcp: 'linear', name: 'list_issues' });
       assert.strictEqual(sources[0].args.teamId, 'team-uuid-123');
       assert.strictEqual(sources[0].args.assigneeId, 'user-uuid-456');
+    });
+    test('expands jira/my-issues preset', async () => {
+      writeFileSync(configPath, `
+sources:
+  - preset: jira/my-issues
+`);
+
+      const { loadRepoConfig, getSources } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      const sources = getSources();
+
+      assert.strictEqual(sources.length, 1);
+      assert.strictEqual(sources[0].name, 'jira-my-issues');
+      assert.deepStrictEqual(sources[0].tool, { mcp: 'mcp-atlassian', name: 'jira_search' });
+      assert.strictEqual(sources[0].item.id, 'jira:{key}');
+      assert.strictEqual(sources[0].worktree_name, '{key}');
+      assert.strictEqual(sources[0].session.name, '{fields.summary}');
     });
 
     test('user config overrides preset values', async () => {
@@ -950,8 +1010,33 @@ sources:
       assert.strictEqual(sources[1].name, 'github-my-issues');
     });
 
-  });
+    test('github, linear, and jira my-issues presets have distinct names when used together', async () => {
+      writeFileSync(configPath, `
+sources:
+  - preset: jira/my-issues
+  - preset: linear/my-issues
+    args:
+      teamId: "team-uuid"
+      assigneeId: "user-uuid"
+  - preset: github/my-issues
+`);
 
+      const { loadRepoConfig, getSources } = await import('../../service/repo-config.js');
+      loadRepoConfig(configPath);
+      const sources = getSources();
+
+      assert.strictEqual(sources.length, 3);
+      assert.strictEqual(sources[0].name, 'jira-my-issues');
+      assert.strictEqual(sources[1].name, 'linear-my-issues');
+      assert.strictEqual(sources[2].name, 'github-my-issues');
+      
+      // Verify all three names are different
+      assert.notStrictEqual(sources[0].name, sources[1].name);
+      assert.notStrictEqual(sources[1].name, sources[2].name);
+      assert.notStrictEqual(sources[0].name, sources[2].name);
+    });
+
+  });
   describe('shorthand syntax', () => {
     test('expands github shorthand to full source', async () => {
       writeFileSync(configPath, `
