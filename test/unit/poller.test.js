@@ -623,6 +623,17 @@ describe('poller.js', () => {
       assert.strictEqual(poller.shouldReprocess(item), true);
     });
 
+    test('shouldReprocess handles non-string state values without throwing', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('issue-obj', { source: 'test', itemState: { name: 'closed' } });
+
+      const item = { id: 'issue-obj', state: { name: 'open' } };
+      assert.doesNotThrow(() => poller.shouldReprocess(item));
+      assert.strictEqual(poller.shouldReprocess(item), false);
+    });
+
     test('shouldReprocess does NOT check updated_at by default (avoids self-triggering)', async () => {
       const { createPoller } = await import('../../service/poller.js');
       

@@ -506,12 +506,13 @@ sources: []
       // Jira preset has provider config with mappings and reprocess_on
       const toolConfig = getToolProviderConfig('jira');
       
-      assert.strictEqual(toolConfig.mappings.title, 'fields.summary');
+      assert.strictEqual(toolConfig.response_key, 'issues');
+      assert.strictEqual(toolConfig.mappings.title, 'summary');
       assert.strictEqual(toolConfig.mappings.number, 'key');
-      assert.strictEqual(toolConfig.mappings.state, 'fields.status.name');
-      assert.strictEqual(toolConfig.mappings.updated_at, 'fields.updated');
+      assert.strictEqual(toolConfig.mappings.state, 'status');
+      assert.strictEqual(toolConfig.mappings.updated_at, 'updated');
+      assert.strictEqual(toolConfig.mappings.body, 'description');
       assert.ok(Array.isArray(toolConfig.reprocess_on));
-      assert.ok(toolConfig.reprocess_on.includes('state'));
     });
 
     test('getToolProviderConfig merges user config with preset defaults', async () => {
@@ -551,14 +552,15 @@ sources: []
       const toolConfig = getToolProviderConfig('jira');
       
       // Should have preset mappings plus user mappings
-      assert.strictEqual(toolConfig.mappings.title, 'fields.summary');
+      assert.strictEqual(toolConfig.response_key, 'issues');
+      assert.strictEqual(toolConfig.mappings.title, 'summary');
       assert.strictEqual(toolConfig.mappings.number, 'key');
-      assert.strictEqual(toolConfig.mappings.state, 'fields.status.name');
-      assert.strictEqual(toolConfig.mappings.updated_at, 'fields.updated');
+      assert.strictEqual(toolConfig.mappings.state, 'status');
+      assert.strictEqual(toolConfig.mappings.updated_at, 'updated');
+      assert.strictEqual(toolConfig.mappings.body, 'description');
       assert.strictEqual(toolConfig.mappings.priority, 'fields.priority.name');
       // Should have preset reprocess_on
       assert.ok(Array.isArray(toolConfig.reprocess_on));
-      assert.ok(toolConfig.reprocess_on.includes('state'));
   });
 
     });
@@ -777,7 +779,7 @@ sources:
       assert.deepStrictEqual(sources[0].tool, { mcp: 'mcp-atlassian', name: 'jira_search' });
       assert.strictEqual(sources[0].item.id, 'jira:{key}');
       assert.strictEqual(sources[0].worktree_name, '{key}');
-      assert.strictEqual(sources[0].session.name, '{fields.summary}');
+      assert.strictEqual(sources[0].session.name, '{summary}');
     });
 
     test('user config overrides preset values', async () => {

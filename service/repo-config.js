@@ -275,12 +275,18 @@ export function getToolMappings(provider) {
   const config = getRawConfig();
   const tools = config.tools || {};
   const toolConfig = tools[provider];
+  const providerAliases = {
+    "mcp-atlassian": "jira",
+  };
+  const aliasedProvider = providerAliases[provider];
+  const aliasedToolConfig = aliasedProvider ? tools[aliasedProvider] : null;
+  const effectiveToolConfig = toolConfig || aliasedToolConfig;
 
-  if (!toolConfig || !toolConfig.mappings) {
+  if (!effectiveToolConfig || !effectiveToolConfig.mappings) {
     return null;
   }
 
-  return toolConfig.mappings;
+  return effectiveToolConfig.mappings;
 }
 
 /**
@@ -293,24 +299,30 @@ export function getToolProviderConfig(provider) {
   const config = getRawConfig();
   const tools = config.tools || {};
   const userToolConfig = tools[provider];
+  const providerAliases = {
+    "mcp-atlassian": "jira",
+  };
+  const aliasedProvider = providerAliases[provider];
+  const aliasedUserToolConfig = aliasedProvider ? tools[aliasedProvider] : null;
+  const effectiveUserToolConfig = userToolConfig || aliasedUserToolConfig;
   
   // Get preset provider config as fallback
-  const presetProviderConfig = getProviderConfig(provider);
+  const presetProviderConfig = getProviderConfig(provider) || (aliasedProvider ? getProviderConfig(aliasedProvider) : null);
 
   // If user has config, merge with preset defaults (user takes precedence)
-  if (userToolConfig) {
+  if (effectiveUserToolConfig) {
     if (presetProviderConfig) {
       return {
         ...presetProviderConfig,
-        ...userToolConfig,
+        ...effectiveUserToolConfig,
         // Deep merge mappings
         mappings: {
           ...(presetProviderConfig.mappings || {}),
-          ...(userToolConfig.mappings || {}),
+          ...(effectiveUserToolConfig.mappings || {}),
         },
       };
     }
-    return userToolConfig;
+    return effectiveUserToolConfig;
   }
 
   // Fall back to preset provider config

@@ -94,7 +94,7 @@ Jira Cloud requires a personal API token for authentication. Passwords are no lo
 
 The MCP server handles authentication using your email address as the username and the API token as the password. This approach is more secure than using your account password.
 
-> **Note**: OAuth 2.0 (3LO) and Jira Server/Data Center are out of scope for this v1 feature.
+> **Note**: Using OAuth 2.0 (3LO) and Jira Server/Data Center are not possible currently.
 
 #### Configuration
 
