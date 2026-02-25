@@ -86,6 +86,26 @@ sources:
       const missingName = { name: 'test', tool: { mcp: 'github' } };
       assert.strictEqual(hasToolConfig(missingName), false);
     });
+
+    test('hasToolConfig accepts Jira MCP tool config', async () => {
+      const { hasToolConfig } = await import('../../service/poll-service.js');
+      
+      // Valid Jira MCP config using mcp-atlassian
+      const jiraMcp = {
+        name: 'jira-issues',
+        tool: { mcp: 'mcp-atlassian', name: 'jira_search' },
+        args: { jql: 'assignee = currentUser() AND statusCategory != Done' }
+      };
+      assert.strictEqual(hasToolConfig(jiraMcp), true);
+      
+      // Jira MCP with different server name (override default)
+      const customJiraMcp = {
+        name: 'custom-jira',
+        tool: { mcp: 'my-jira-server', name: 'custom_jira_search' },
+        args: {}
+      };
+      assert.strictEqual(hasToolConfig(customJiraMcp), true);
+    });
   });
 
   describe('buildActionConfigFromSource', () => {
@@ -377,6 +397,42 @@ sources:
       
       // Should use source working_dir since repo not in config
       assert.strictEqual(actionConfig.working_dir, '~/default/path');
+    });
+
+    test('builds action config for repo-agnostic Jira source', async () => {
+      const config = `
+sources:
+  - preset: jira/my-issues
+    working_dir: ~/projects/jira-work
+`;
+      writeFileSync(configPath, config);
+
+      const { loadRepoConfig } = await import('../../service/repo-config.js');
+      const { buildActionConfigForItem } = await import('../../service/poll-service.js');
+      loadRepoConfig(configPath);
+      
+      // Jira source - repo-agnostic (no repo template in item)
+      const source = {
+        name: 'jira-issues',
+        tool: { mcp: 'mcp-atlassian', name: 'jira_search' },
+        working_dir: '~/projects/jira-work'
+      };
+      // Jira item format: jira:{key}, no repository context
+      const item = { 
+        id: 'jira:PROJ-123',
+        key: 'PROJ-123',
+        fields: {
+          summary: 'Fix authentication bug',
+          status: { name: 'In Progress' }
+        }
+      };
+      
+      const actionConfig = buildActionConfigForItem(source, item);
+      
+      // Should use source working_dir since Jira is repo-agnostic
+      assert.strictEqual(actionConfig.working_dir, '~/projects/jira-work');
+      // repo_path is set from working_dir (normalized by buildActionConfigFromSource)
+      assert.strictEqual(actionConfig.repo_path, '~/projects/jira-work');
     });
   });
 });

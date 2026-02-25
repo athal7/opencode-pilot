@@ -33,7 +33,7 @@ import os from "os";
 // The /command endpoint can take 30-45s to return headers because it does
 // work before responding. The /message endpoint returns headers in ~1ms.
 // These are generous upper bounds — if exceeded, the server is genuinely stuck.
-export const HEADER_TIMEOUT_MS = 60_000;
+export const HEADER_TIMEOUT_MS = 180_000;
 
 /**
  * Parse a slash command from the beginning of a prompt

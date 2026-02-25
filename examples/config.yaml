@@ -57,6 +57,15 @@ sources:
     working_dir: ~/code/myproject
     prompt: worktree
 
+  # Jira (requires mcp-atlassian MCP server)
+  - preset: jira/my-issues
+    args:
+      # Optional: custom JQL query (default: assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC)
+      jql: "assignee = currentUser() AND status = \"In Progress\" ORDER BY priority DESC, updated DESC"
+    # Jira issues are repo-agnostic - specify working_dir to set a default project location
+    working_dir: ~/code/myproject
+    prompt: worktree
+
   # Example with worktree support - run each issue in a fresh git worktree
   # - preset: github/my-issues
   #   worktree: "new"                    # Create a new worktree per session
@@ -83,6 +92,19 @@ sources:
   #     id: "reminder:{id}"
   #   session:
   #     name: "{title}"  # Optional: custom session name (presets have semantic defaults)
+  
+  # Multiple Jira sources with different filters
+  # - preset: jira/my-issues
+  #   name: urgent-jira
+  #   args:
+  #     jql: "priority = High AND statusCategory != Done"
+  #   repos:
+  #     - myorg/backend  # Restrict to specific repos (optional)
+  # - preset: jira/my-issues
+  #   name: team-jira
+  #   args:
+  #     jql: "component = 'Backend' AND assignee = currentUser() AND statusCategory != Done"
+  #   working_dir: ~/code/backend
 
 # Tool config for custom MCP servers (GitHub/Linear have built-in config)
 # tools:
@@ -91,6 +113,15 @@ sources:
 #     mappings:
 #       title: name
 #       body: notes
+#   jira:
+#     response_key: issues
+#     mappings:
+#       summary: fields.summary
+#       key: key
+#       status: fields.status.name
+#       updated: fields.updated
+#     # Override default JQL if your MCP server uses a different tool name
+#     # tool_name: jira_search
 
 # Explicit repo mappings (overrides repos_dir auto-discovery)
 # Only needed if a repo isn't in repos_dir or needs custom settings
@@ -103,4 +134,4 @@ sources:
 #   ttl_days: 30
 
 # Available presets: github/my-issues, github/review-requests,
-# github/my-prs-attention, linear/my-issues
+# github/my-prs-attention, linear/my-issues, jira/my-issues

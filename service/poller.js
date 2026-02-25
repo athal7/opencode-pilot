@@ -172,6 +172,15 @@ async function createTransport(mcpConfig) {
     }
   }
 
+  // Infer type from config structure if not explicitly set
+  if (!mcpConfig.type) {
+    if (mcpConfig.command) {
+      mcpConfig.type = "local";
+    } else if (mcpConfig.url) {
+      mcpConfig.type = "remote";
+    }
+  }
+
   if (mcpConfig.type === "remote") {
     const url = new URL(mcpConfig.url);
     if (mcpConfig.url.includes("linear.app/sse")) {
@@ -181,14 +190,45 @@ async function createTransport(mcpConfig) {
     }
   } else if (mcpConfig.type === "local") {
     const command = mcpConfig.command;
+    const extraArgs = Array.isArray(mcpConfig.args) ? mcpConfig.args : [];
     if (!command || command.length === 0) {
       throw new Error("Local MCP config missing command");
     }
-    const [cmd, ...args] = command;
+
+    let cmd;
+    let args;
+
+    if (Array.isArray(command)) {
+      [cmd, ...args] = command;
+      args = [...args, ...extraArgs];
+    } else {
+      // If args are provided separately (OpenCode/Claude-style MCP config),
+      // use command as-is and pass args separately.
+      if (extraArgs.length > 0) {
+        cmd = command;
+        args = extraArgs;
+      } else {
+        // Backward-compatible fallback for legacy single-string commands.
+        [cmd, ...args] = command.trim().split(/\s+/);
+      }
+    }
+
+    if (!cmd) {
+      throw new Error("Local MCP config has empty command");
+    }
+
+    const expandedEnv = {};
+    const localEnv = mcpConfig.env || mcpConfig.environment;
+    if (localEnv) {
+      for (const [key, value] of Object.entries(localEnv)) {
+        expandedEnv[key] = typeof value === "string" ? expandEnvVars(value) : value;
+      }
+    }
+
     return new StdioClientTransport({
       command: cmd,
       args,
-      env: { ...process.env },
+      env: { ...process.env, ...expandedEnv },
     });
   }
 
@@ -1230,9 +1270,9 @@ export function createPoller(options = {}) {
           const storedState = meta.itemState;
           const currentState = item[field];
           
-          if (storedState && currentState) {
-            const stored = storedState.toLowerCase();
-            const current = currentState.toLowerCase();
+          if (storedState != null && currentState != null) {
+            const stored = String(storedState).toLowerCase();
+            const current = String(currentState).toLowerCase();
             
             // Reopened: was closed/merged/done, now open/in-progress
             if ((stored === 'closed' || stored === 'merged' || stored === 'done') 

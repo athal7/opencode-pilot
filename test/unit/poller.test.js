@@ -623,6 +623,17 @@ describe('poller.js', () => {
       assert.strictEqual(poller.shouldReprocess(item), true);
     });
 
+    test('shouldReprocess handles non-string state values without throwing', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+
+      const poller = createPoller({ stateFile });
+      poller.markProcessed('issue-obj', { source: 'test', itemState: { name: 'closed' } });
+
+      const item = { id: 'issue-obj', state: { name: 'open' } };
+      assert.doesNotThrow(() => poller.shouldReprocess(item));
+      assert.strictEqual(poller.shouldReprocess(item), false);
+    });
+
     test('shouldReprocess does NOT check updated_at by default (avoids self-triggering)', async () => {
       const { createPoller } = await import('../../service/poller.js');
       
@@ -1150,6 +1161,75 @@ describe('poller.js', () => {
     test('extracts value using regex syntax', async () => {
       const { applyMappings } = await import('../../service/poller.js');
       
+    test('generates stable ID from Jira key', async () => {
+      const { transformItems } = await import('../../service/poller.js');
+      
+      const items = [
+        { key: 'PROJ-100', fields: { summary: 'Issue A' } },
+        { key: 'PROJ-200', fields: { summary: 'Issue B' } }
+      ];
+      const idTemplate = 'jira:{key}';
+      
+      const transformed = transformItems(items, idTemplate);
+      
+      assert.strictEqual(transformed[0].id, 'jira:PROJ-100');
+      assert.strictEqual(transformed[1].id, 'jira:PROJ-200');
+      // Original fields preserved
+      assert.strictEqual(transformed[0].fields.summary, 'Issue A');
+    });
+
+    test('combines Jira mappings with ID generation', async () => {
+      const { transformItems, applyMappings } = await import('../../service/poller.js');
+      
+      const items = [
+        {
+          key: 'PROJ-1',
+          fields: {
+            summary: 'Authentication issue',
+            status: { name: 'To Do' },
+            updated: '2026-02-20T09:00:00Z'
+          }
+        },
+        {
+          key: 'PROJ-2',
+          fields: {
+            summary: 'Performance improvement',
+            status: { name: 'In Review' },
+            updated: '2026-02-21T16:30:00Z'
+          }
+        }
+      ];
+      // Jira provider mappings
+      const mappings = {
+        title: 'fields.summary',
+        number: 'key',
+        state: 'fields.status.name',
+        updated_at: 'fields.updated'
+      };
+      const idTemplate = 'jira:{key}';
+      
+      // Apply mappings, then transform
+      const mappedItems = items.map(item => applyMappings(item, mappings));
+      const transformed = transformItems(mappedItems, idTemplate);
+      
+      // Check first item
+      assert.strictEqual(transformed[0].id, 'jira:PROJ-1');
+      assert.strictEqual(transformed[0].number, 'PROJ-1');
+      assert.strictEqual(transformed[0].title, 'Authentication issue');
+      assert.strictEqual(transformed[0].state, 'To Do');
+      assert.strictEqual(transformed[0].updated_at, '2026-02-20T09:00:00Z');
+      
+      // Check second item
+      assert.strictEqual(transformed[1].id, 'jira:PROJ-2');
+      assert.strictEqual(transformed[1].number, 'PROJ-2');
+      assert.strictEqual(transformed[1].title, 'Performance improvement');
+      assert.strictEqual(transformed[1].state, 'In Review');
+      assert.strictEqual(transformed[1].updated_at, '2026-02-21T16:30:00Z');
+      
+      // Original fields preserved
+      assert.strictEqual(transformed[0].key, 'PROJ-1');
+      assert.strictEqual(transformed[0].fields.summary, 'Authentication issue');
+    });
       const item = {
         title: 'Fix the bug',
         url: 'https://linear.app/0din/issue/0DIN-683/attack-technique-detection'
@@ -1243,6 +1323,60 @@ describe('poller.js', () => {
     test('extracts array using response_key', async () => {
       const { parseJsonArray } = await import('../../service/poller.js');
       
+    test('maps Jira fields to normalized fields', async () => {
+      const { applyMappings } = await import('../../service/poller.js');
+      
+      const item = {
+        key: 'PROJ-456',
+        fields: {
+          summary: 'Implement new feature',
+          status: { name: 'In Progress' },
+          updated: '2026-02-23T14:22:00Z'
+        }
+      };
+      // Jira provider mappings from preset
+      const mappings = {
+        title: 'fields.summary',
+        number: 'key',
+        state: 'fields.status.name',
+        updated_at: 'fields.updated'
+      };
+      
+      const mapped = applyMappings(item, mappings);
+      
+      assert.strictEqual(mapped.number, 'PROJ-456');
+      assert.strictEqual(mapped.title, 'Implement new feature');
+      assert.strictEqual(mapped.state, 'In Progress');
+      assert.strictEqual(mapped.updated_at, '2026-02-23T14:22:00Z');
+      // Original fields preserved
+      assert.strictEqual(mapped.key, 'PROJ-456');
+      assert.strictEqual(mapped.fields.summary, 'Implement new feature');
+    });
+
+    test('handles missing Jira fields gracefully', async () => {
+      const { applyMappings } = await import('../../service/poller.js');
+      
+      const item = {
+        key: 'PROJ-789',
+        fields: {
+          summary: 'Fix bug'
+          // status and updated missing
+        }
+      };
+      const mappings = {
+        title: 'fields.summary',
+        number: 'key',
+        state: 'fields.status.name',
+        updated_at: 'fields.updated'
+      };
+      
+      const mapped = applyMappings(item, mappings);
+      
+      assert.strictEqual(mapped.number, 'PROJ-789');
+      assert.strictEqual(mapped.title, 'Fix bug');
+      assert.strictEqual(mapped.state, undefined);
+      assert.strictEqual(mapped.updated_at, undefined);
+    });
       const text = JSON.stringify({
         reminders: [
           { id: 'reminder-1', name: 'Task 1', completed: false },
@@ -1283,6 +1417,45 @@ describe('poller.js', () => {
       
       const text = JSON.stringify({ items: [{ id: '1' }] });
       const result = parseJsonArray(text, 'test', 'reminders');
+      
+      assert.strictEqual(result.length, 0);
+    });
+    test('extracts Jira issues array from mcp-atlassian response', async () => {
+      const { parseJsonArray } = await import('../../service/poller.js');
+      
+      // Jira mcp-atlassian jira_search returns array at root (no wrapper)
+      const text = JSON.stringify([
+        {
+          key: 'PROJ-123',
+          fields: {
+            summary: 'Fix authentication bug',
+            status: { name: 'In Progress' },
+            updated: '2026-02-23T10:30:00Z'
+          }
+        },
+        {
+          key: 'PROJ-124',
+          fields: {
+            summary: 'Add user preferences',
+            status: { name: 'To Do' },
+            updated: '2026-02-22T15:45:00Z'
+          }
+        }
+      ]);
+      const result = parseJsonArray(text, 'jira/my-issues');
+      
+      assert.strictEqual(result.length, 2);
+      assert.strictEqual(result[0].key, 'PROJ-123');
+      assert.strictEqual(result[0].fields.summary, 'Fix authentication bug');
+      assert.strictEqual(result[1].key, 'PROJ-124');
+      assert.strictEqual(result[1].fields.summary, 'Add user preferences');
+    });
+
+    test('handles empty Jira search results', async () => {
+      const { parseJsonArray } = await import('../../service/poller.js');
+      
+      const text = JSON.stringify([]);
+      const result = parseJsonArray(text, 'jira/my-issues');
       
       assert.strictEqual(result.length, 0);
     });
