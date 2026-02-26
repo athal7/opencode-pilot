@@ -14,7 +14,7 @@
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
 import os from "os";
 import YAML from "yaml";
 
@@ -179,6 +179,7 @@ Commands:
   status               Show service status and version
   config               Validate and show configuration
   clear                Clear processed state entries
+  logs                 Show debug log output
   test-source NAME     Test a source by fetching items and showing mappings
   test-mapping MCP     Test field mappings with sample JSON input
   help                 Show this help message
@@ -188,6 +189,11 @@ Clear options:
   --source NAME        Clear entries for a specific source
   --item ID            Clear a specific item
   --expired            Clear only expired entries (uses configured TTL)
+
+Logs options:
+  --path               Print the log file path and exit
+  --lines N            Print last N lines (default: 50)
+  --follow             Follow the log file (like tail -f)
 
 The service handles:
 - Polling for GitHub/Linear issues to work on
@@ -200,6 +206,10 @@ Examples:
   opencode-pilot config                  # Validate and show config
   opencode-pilot clear --all             # Clear all processed state
   opencode-pilot clear --expired         # Clear expired entries
+  opencode-pilot logs                    # Show last 50 log lines
+  opencode-pilot logs --lines 100        # Show last 100 log lines
+  opencode-pilot logs --follow           # Follow the log in real time
+  opencode-pilot logs --path             # Print the log file path
   opencode-pilot test-source my-issues   # Test a source
   echo '{"url":"https://linear.app/team/issue/PROJ-123/title"}' | opencode-pilot test-mapping linear
 `);
@@ -813,6 +823,87 @@ async function clearCommand(flags) {
 }
 
 // ============================================================================
+// Logs Command
+// ============================================================================
+
+// Default log path (mirrors service/logger.js)
+const DEFAULT_LOG_PATH = join(os.homedir(), ".local", "share", "opencode-pilot", "debug.log");
+
+/**
+ * Resolve the debug log file path.
+ * Can be overridden via PILOT_LOG_PATH env var (used in tests).
+ */
+function getLogPath() {
+  return process.env.PILOT_LOG_PATH || DEFAULT_LOG_PATH;
+}
+
+/**
+ * Read the last `n` lines from a file synchronously.
+ * Returns an empty array if the file does not exist.
+ */
+function tailLines(filePath, n) {
+  if (!existsSync(filePath)) return [];
+  const content = readFileSync(filePath, "utf8");
+  const lines = content.split("\n");
+  // Remove trailing empty line produced by a file ending with \n
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines.slice(-n);
+}
+
+/**
+ * Parse a --lines flag value, falling back to `defaultN` for missing/invalid input.
+ */
+function parseLineCount(value, defaultN) {
+  if (value === undefined || value === true || value === false) return defaultN;
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? n : defaultN;
+}
+
+async function logsCommand(flags) {
+  const logPath = getLogPath();
+
+  // --path: just print the path and exit
+  if (flags.path) {
+    console.log(logPath);
+    return;
+  }
+
+  // --follow: stream the file using tail -f
+  if (flags.follow) {
+    if (!existsSync(logPath)) {
+      console.log(`No log file yet. Enable debug logging with PILOT_DEBUG=true.`);
+      console.log(`Log path: ${logPath}`);
+      return;
+    }
+    const lineCount = parseLineCount(flags.lines, 50);
+    // Use system `tail -f` for reliable follow behaviour
+    const tail = spawn("tail", ["-f", "-n", String(lineCount), logPath], {
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    await new Promise((resolve, reject) => {
+      tail.on("error", reject);
+      tail.on("close", resolve);
+    });
+    return;
+  }
+
+  // Default: print last N lines
+  const n = parseLineCount(flags.lines, 50);
+  if (!existsSync(logPath)) {
+    console.log(`No log file found. Debug logging is enabled via PILOT_DEBUG=true.`);
+    console.log(`Log path: ${logPath}`);
+    return;
+  }
+
+  const lines = tailLines(logPath, n);
+  if (lines.length === 0) {
+    console.log(`Log file is empty: ${logPath}`);
+    return;
+  }
+  console.log(lines.join("\n"));
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -844,6 +935,10 @@ async function main() {
 
     case "clear":
       await clearCommand(parseArgs(args).flags);
+      break;
+
+    case "logs":
+      await logsCommand(parseArgs(args).flags);
       break;
 
     case "test-source":
