@@ -746,6 +746,25 @@ describe('poller.js', () => {
       );
     });
 
+    test('shouldReprocess returns false when Linear issue cycles in_progress -> code_review -> in_progress', async () => {
+      const { createPoller } = await import('../../service/poller.js');
+
+      const poller = createPoller({ stateFile });
+      // Issue was processed while in_progress
+      poller.markProcessed('linear:ENG-1', { source: 'linear', itemState: 'In Progress' });
+
+      // Issue moved to In Review - disappears from the "my ready issues" poll
+      poller.markUnseen('linear', []);
+
+      // Issue moved back to In Progress - reappears
+      const item = { id: 'linear:ENG-1', status: 'In Progress' };
+      assert.strictEqual(
+        poller.shouldReprocess(item, { reprocessOn: ['status'] }),
+        false,
+        'should NOT reprocess: issue cycled through code review and returned to same in_progress state'
+      );
+    });
+
     test('shouldReprocess returns true for reappeared item (e.g., uncompleted reminder)', async () => {
       const { createPoller } = await import('../../service/poller.js');
       

@@ -1215,7 +1215,20 @@ export function createPoller(options = {}) {
       if (!meta) return false; // Not processed before
       
       // Check if item reappeared after being missing (e.g., uncompleted reminder)
+      // Exception: suppress reprocessing when the item cycled through an intermediate
+      // state (e.g., Linear: In Progress -> In Review -> In Progress). If the stored
+      // state and the current state are both "in progress", the issue just passed
+      // through code review and back — no new work is needed.
       if (meta.wasUnseen) {
+        const storedState = meta.itemState;
+        const currentState = item.state || item.status;
+        if (storedState && currentState) {
+          const stored = storedState.toLowerCase();
+          const current = currentState.toLowerCase();
+          if (stored === 'in progress' && current === 'in progress') {
+            return false;
+          }
+        }
         return true;
       }
       
