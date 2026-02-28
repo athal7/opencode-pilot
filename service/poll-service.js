@@ -32,12 +32,29 @@ export function hasToolConfig(source) {
 
 /**
  * Build action config from source and repo config
- * Source fields override repo config fields
- * @param {object} source - Source configuration
+ * Priority for operational fields: explicit source > repo > defaults (baked into source)
+ * @param {object} source - Source configuration (may include _explicit tracking of explicitly-set fields)
  * @param {object} repoConfig - Repository configuration
  * @returns {object} Merged action config
  */
 export function buildActionConfigFromSource(source, repoConfig) {
+  // _explicit tracks fields set directly on the source (not inherited from defaults).
+  // When _explicit is absent (e.g., tests constructing source objects directly), fall
+  // back to treating source fields as explicit.
+  const explicit = source._explicit;
+
+  // Resolve each operational field using priority: explicit source > repo > defaults (source)
+  const resolveField = (field) => {
+    if (explicit) {
+      // Normalization tracked explicit fields: use them in priority order
+      if (explicit[field] !== undefined) return explicit[field];
+      if (repoConfig[field] !== undefined) return repoConfig[field];
+      return source[field]; // defaults (baked into source)
+    }
+    // No tracking available (e.g., raw source in tests): source wins, then repo
+    return source[field] !== undefined ? source[field] : repoConfig[field];
+  };
+
   return {
     // Repo config as base
     ...repoConfig,
@@ -45,11 +62,11 @@ export function buildActionConfigFromSource(source, repoConfig) {
     repo_path: source.working_dir || repoConfig.path || repoConfig.repo_path,
     // Session from source or repo
     session: source.session || repoConfig.session || {},
-    // Source-level overrides (highest priority)
-    ...(source.prompt && { prompt: source.prompt }),
-    ...(source.agent && { agent: source.agent }),
-    ...(source.model && { model: source.model }),
-    ...(source.working_dir && { working_dir: source.working_dir }),
+    // Operational fields with correct priority
+    ...(resolveField('prompt') && { prompt: resolveField('prompt') }),
+    ...(resolveField('agent') && { agent: resolveField('agent') }),
+    ...(resolveField('model') && { model: resolveField('model') }),
+    ...(resolveField('working_dir') && { working_dir: resolveField('working_dir') }),
     ...(source.worktree_name && { worktree_name: source.worktree_name }),
   };
 }

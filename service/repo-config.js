@@ -230,10 +230,22 @@ function normalizeSource(source, defaults) {
   }
 
   // Apply defaults (source values take precedence)
-  return {
+  const merged = {
     ...defaults,
     ...normalized,
   };
+
+  // Track which operational fields were explicitly set in the source (not inherited from defaults).
+  // This allows downstream config builders to apply the correct priority:
+  //   explicit source > repo > defaults
+  merged._explicit = {};
+  for (const field of ['model', 'agent', 'prompt', 'working_dir']) {
+    if (normalized[field] !== undefined) {
+      merged._explicit[field] = normalized[field];
+    }
+  }
+
+  return merged;
 }
 
 /**

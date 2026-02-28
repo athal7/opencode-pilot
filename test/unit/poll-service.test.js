@@ -378,5 +378,107 @@ sources:
       // Should use source working_dir since repo not in config
       assert.strictEqual(actionConfig.working_dir, '~/default/path');
     });
+
+    test('repo model overrides defaults model', async () => {
+      const config = `
+defaults:
+  model: anthropic/claude-haiku-3.5
+
+repos:
+  myorg/backend:
+    path: ~/code/backend
+    model: anthropic/claude-sonnet-4-20250514
+
+sources:
+  - preset: github/my-issues
+`;
+      writeFileSync(configPath, config);
+
+      const { loadRepoConfig, getSources } = await import('../../service/repo-config.js');
+      const { buildActionConfigForItem } = await import('../../service/poll-service.js');
+      loadRepoConfig(configPath);
+      const sources = getSources();
+      
+      const item = { 
+        repository: { nameWithOwner: 'myorg/backend' },
+        number: 123,
+        title: 'Fix bug',
+        url: 'https://github.com/myorg/backend/issues/123'
+      };
+      
+      const actionConfig = buildActionConfigForItem(sources[0], item);
+      
+      // Repo model should override the default model
+      assert.strictEqual(actionConfig.model, 'anthropic/claude-sonnet-4-20250514',
+        'repo model should override defaults.model');
+    });
+
+    test('explicit source model overrides repo model', async () => {
+      const config = `
+defaults:
+  model: anthropic/claude-haiku-3.5
+
+repos:
+  myorg/backend:
+    path: ~/code/backend
+    model: anthropic/claude-sonnet-4-20250514
+
+sources:
+  - preset: github/my-issues
+    model: anthropic/claude-opus-4
+`;
+      writeFileSync(configPath, config);
+
+      const { loadRepoConfig, getSources } = await import('../../service/repo-config.js');
+      const { buildActionConfigForItem } = await import('../../service/poll-service.js');
+      loadRepoConfig(configPath);
+      const sources = getSources();
+      
+      const item = { 
+        repository: { nameWithOwner: 'myorg/backend' },
+        number: 123,
+        title: 'Fix bug',
+        url: 'https://github.com/myorg/backend/issues/123'
+      };
+      
+      const actionConfig = buildActionConfigForItem(sources[0], item);
+      
+      // Explicit source model should win over repo and defaults
+      assert.strictEqual(actionConfig.model, 'anthropic/claude-opus-4',
+        'explicit source model should override repo model and defaults');
+    });
+
+    test('defaults model used when neither source nor repo specifies model', async () => {
+      const config = `
+defaults:
+  model: anthropic/claude-haiku-3.5
+
+repos:
+  myorg/backend:
+    path: ~/code/backend
+
+sources:
+  - preset: github/my-issues
+`;
+      writeFileSync(configPath, config);
+
+      const { loadRepoConfig, getSources } = await import('../../service/repo-config.js');
+      const { buildActionConfigForItem } = await import('../../service/poll-service.js');
+      loadRepoConfig(configPath);
+      const sources = getSources();
+      
+      const item = { 
+        repository: { nameWithOwner: 'myorg/backend' },
+        number: 123,
+        title: 'Fix bug',
+        url: 'https://github.com/myorg/backend/issues/123'
+      };
+      
+      const actionConfig = buildActionConfigForItem(sources[0], item);
+      
+      // Should fall back to defaults.model
+      assert.strictEqual(actionConfig.model, 'anthropic/claude-haiku-3.5',
+        'defaults model should be used when neither source nor repo sets model');
+    });
   });
 });

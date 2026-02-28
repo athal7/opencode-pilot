@@ -38,7 +38,7 @@ sources:
   # PR presets have detect_stacks: true by default, enabling session reuse
   # across stacked PRs (where one PR's head branch = another's base branch)
   - preset: github/review-requests
-    # Per-source model override (takes precedence over defaults.model)
+    # Per-source model override (takes precedence over defaults.model and repos.*.model)
     # model: anthropic/claude-haiku-3.5
 
   # PRs needing attention (conflicts OR human feedback)
@@ -94,9 +94,16 @@ sources:
 
 # Explicit repo mappings (overrides repos_dir auto-discovery)
 # Only needed if a repo isn't in repos_dir or needs custom settings
+# Repos can also specify per-directory overrides for model, agent, and prompt.
+# Priority: source override > repo override > defaults
 # repos:
 #   myorg/backend:
 #     path: ~/code/backend
+#     # Per-directory model override (overrides defaults.model, overridden by source.model)
+#     # model: anthropic/claude-sonnet-4-20250514
+#   myorg/legacy-service:
+#     path: ~/code/legacy-service
+#     model: anthropic/claude-haiku-3.5  # use cheaper model for this repo
 
 # Cleanup config (optional, sensible defaults)
 # cleanup:

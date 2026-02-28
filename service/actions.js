@@ -363,13 +363,30 @@ export function buildPromptFromTemplate(templateName, item, templatesDir) {
 
 /**
  * Merge source, repo config, and defaults into action config
- * Priority: source > repo > defaults
- * @param {object} source - Source configuration
+ * Priority: explicit source > repo > defaults
+ * @param {object} source - Source configuration (may include _explicit tracking from normalizeSource)
  * @param {object} repoConfig - Repository configuration
  * @param {object} defaults - Default configuration
  * @returns {object} Merged action config
  */
 export function getActionConfig(source, repoConfig, defaults) {
+  // _explicit tracks fields set directly on the source (not inherited from defaults).
+  // When _explicit is absent (e.g., tests constructing source objects directly), fall
+  // back to treating non-undefined source fields as explicit.
+  const explicit = source._explicit;
+
+  const resolveField = (field) => {
+    if (explicit) {
+      if (explicit[field] !== undefined) return explicit[field];
+      if (repoConfig[field] !== undefined) return repoConfig[field];
+      return defaults[field];
+    }
+    // No tracking: source wins, then repo, then defaults
+    if (source[field] !== undefined) return source[field];
+    if (repoConfig[field] !== undefined) return repoConfig[field];
+    return defaults[field];
+  };
+
   return {
     // Defaults first
     ...defaults,
@@ -380,11 +397,11 @@ export function getActionConfig(source, repoConfig, defaults) {
       ...(defaults.session || {}),
       ...(repoConfig.session || {}),
     },
-    // Source-level overrides (highest priority)
-    ...(source.prompt && { prompt: source.prompt }),
-    ...(source.agent && { agent: source.agent }),
-    ...(source.model && { model: source.model }),
-    ...(source.working_dir && { working_dir: source.working_dir }),
+    // Operational fields with correct priority: explicit source > repo > defaults
+    ...(resolveField('prompt') && { prompt: resolveField('prompt') }),
+    ...(resolveField('agent') && { agent: resolveField('agent') }),
+    ...(resolveField('model') && { model: resolveField('model') }),
+    ...(resolveField('working_dir') && { working_dir: resolveField('working_dir') }),
   };
 }
 
