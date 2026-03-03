@@ -281,6 +281,121 @@ Check for bugs and security issues.`;
 
   });
 
+  describe('readTargetOpencodeConfig', () => {
+    test('returns global model from .opencode/opencode.json', async () => {
+      const { readTargetOpencodeConfig } = await import('../../service/actions.js');
+
+      const opencodeDir = join(tempDir, '.opencode');
+      mkdirSync(opencodeDir);
+      writeFileSync(join(opencodeDir, 'opencode.json'), JSON.stringify({
+        model: 'anthropic/claude-haiku-3.5'
+      }));
+
+      const result = readTargetOpencodeConfig(tempDir);
+      assert.strictEqual(result.model, 'anthropic/claude-haiku-3.5');
+    });
+
+    test('returns per-agent model from .opencode/opencode.json', async () => {
+      const { readTargetOpencodeConfig } = await import('../../service/actions.js');
+
+      const opencodeDir = join(tempDir, '.opencode');
+      mkdirSync(opencodeDir);
+      writeFileSync(join(opencodeDir, 'opencode.json'), JSON.stringify({
+        model: 'anthropic/claude-sonnet-4-20250514',
+        agent: {
+          plan: { model: 'anthropic/claude-haiku-3.5' }
+        }
+      }));
+
+      const result = readTargetOpencodeConfig(tempDir, 'plan');
+      assert.strictEqual(result.model, 'anthropic/claude-haiku-3.5');
+    });
+
+    test('falls back to global model when agent has no model', async () => {
+      const { readTargetOpencodeConfig } = await import('../../service/actions.js');
+
+      const opencodeDir = join(tempDir, '.opencode');
+      mkdirSync(opencodeDir);
+      writeFileSync(join(opencodeDir, 'opencode.json'), JSON.stringify({
+        model: 'anthropic/claude-opus-4',
+        agent: {
+          plan: { temperature: 0.5 }
+        }
+      }));
+
+      const result = readTargetOpencodeConfig(tempDir, 'plan');
+      assert.strictEqual(result.model, 'anthropic/claude-opus-4');
+    });
+
+    test('returns empty object when no .opencode/opencode.json exists', async () => {
+      const { readTargetOpencodeConfig } = await import('../../service/actions.js');
+
+      const result = readTargetOpencodeConfig(tempDir);
+      assert.deepStrictEqual(result, {});
+    });
+
+    test('returns empty object when .opencode/opencode.json is malformed', async () => {
+      const { readTargetOpencodeConfig } = await import('../../service/actions.js');
+
+      const opencodeDir = join(tempDir, '.opencode');
+      mkdirSync(opencodeDir);
+      writeFileSync(join(opencodeDir, 'opencode.json'), 'not valid json {{{');
+
+      const result = readTargetOpencodeConfig(tempDir);
+      assert.deepStrictEqual(result, {});
+    });
+  });
+
+  describe('getActionConfig with target dir opencode config', () => {
+    test('uses target-dir model when no pilot model is set', async () => {
+      const { getActionConfig } = await import('../../service/actions.js');
+
+      const source = { name: 'my-issues' };
+      const repoConfig = { path: tempDir };
+      const defaults = {};
+      const targetDirConfig = { model: 'anthropic/claude-haiku-3.5' };
+
+      const config = getActionConfig(source, repoConfig, defaults, targetDirConfig);
+      assert.strictEqual(config.model, 'anthropic/claude-haiku-3.5');
+    });
+
+    test('pilot model overrides target-dir model', async () => {
+      const { getActionConfig } = await import('../../service/actions.js');
+
+      const source = { name: 'my-issues', model: 'anthropic/claude-opus-4' };
+      const repoConfig = { path: tempDir };
+      const defaults = {};
+      const targetDirConfig = { model: 'anthropic/claude-haiku-3.5' };
+
+      const config = getActionConfig(source, repoConfig, defaults, targetDirConfig);
+      assert.strictEqual(config.model, 'anthropic/claude-opus-4');
+    });
+
+    test('defaults model overrides target-dir model', async () => {
+      const { getActionConfig } = await import('../../service/actions.js');
+
+      const source = { name: 'my-issues' };
+      const repoConfig = { path: tempDir };
+      const defaults = { model: 'anthropic/claude-sonnet-4-20250514' };
+      const targetDirConfig = { model: 'anthropic/claude-haiku-3.5' };
+
+      const config = getActionConfig(source, repoConfig, defaults, targetDirConfig);
+      assert.strictEqual(config.model, 'anthropic/claude-sonnet-4-20250514');
+    });
+
+    test('target-dir model used when only defaults have no model', async () => {
+      const { getActionConfig } = await import('../../service/actions.js');
+
+      const source = { name: 'my-issues' };
+      const repoConfig = { path: tempDir };
+      const defaults = {};
+      const targetDirConfig = { model: 'openai/gpt-4o' };
+
+      const config = getActionConfig(source, repoConfig, defaults, targetDirConfig);
+      assert.strictEqual(config.model, 'openai/gpt-4o');
+    });
+  });
+
   describe('buildCommand', () => {
     test('builds display string for API call', async () => {
       const { buildCommand } = await import('../../service/actions.js');
@@ -988,6 +1103,64 @@ Check for bugs and security issues.`;
       // Result directory is the worktree (where file operations happen)
       assert.strictEqual(result.directory, '/data/worktree/calm-wizard',
         'Result should include worktree directory');
+    });
+
+    test('uses target dir opencode config model when no pilot model set (dry run)', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+
+      // Write .opencode/opencode.json into the temp project dir
+      const opencodeDir = join(tempDir, '.opencode');
+      mkdirSync(opencodeDir, { recursive: true });
+      writeFileSync(join(opencodeDir, 'opencode.json'), JSON.stringify({
+        model: 'anthropic/claude-haiku-3.5'
+      }));
+
+      const item = { number: 1, title: 'Fix bug' };
+      const config = {
+        path: tempDir,
+        prompt: 'default',
+        agent: 'plan',
+        // No model set in pilot config
+      };
+
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      const result = await executeAction(item, config, {
+        dryRun: true,
+        discoverServer: mockDiscoverServer,
+      });
+
+      assert.ok(result.dryRun);
+      assert.strictEqual(result.model, 'anthropic/claude-haiku-3.5',
+        'Should use target dir model as fallback');
+    });
+
+    test('target dir opencode config model does not override pilot model (dry run)', async () => {
+      const { executeAction } = await import('../../service/actions.js');
+
+      // Write .opencode/opencode.json into the temp project dir
+      const opencodeDir = join(tempDir, '.opencode');
+      mkdirSync(opencodeDir, { recursive: true });
+      writeFileSync(join(opencodeDir, 'opencode.json'), JSON.stringify({
+        model: 'anthropic/claude-haiku-3.5'
+      }));
+
+      const item = { number: 1, title: 'Fix bug' };
+      const config = {
+        path: tempDir,
+        prompt: 'default',
+        agent: 'plan',
+        model: 'anthropic/claude-opus-4',  // Pilot model is set — should win
+      };
+
+      const mockDiscoverServer = async () => 'http://localhost:4096';
+      const result = await executeAction(item, config, {
+        dryRun: true,
+        discoverServer: mockDiscoverServer,
+      });
+
+      assert.ok(result.dryRun);
+      assert.strictEqual(result.model, 'anthropic/claude-opus-4',
+        'Pilot model should override target dir model');
     });
   });
 
