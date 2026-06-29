@@ -1336,8 +1336,11 @@ Check for bugs and security issues.`;
       );
       
       assert.strictEqual(messageBody.agent, 'code', 'Should pass agent');
-      assert.strictEqual(messageBody.providerID, 'anthropic', 'Should parse provider from model');
-      assert.strictEqual(messageBody.modelID, 'claude-sonnet-4-20250514', 'Should parse model ID');
+      assert.ok(messageBody.model, 'Should include model object');
+      assert.strictEqual(messageBody.model.providerID, 'anthropic', 'Should parse provider from model');
+      assert.strictEqual(messageBody.model.modelID, 'claude-sonnet-4-20250514', 'Should parse model ID');
+      assert.strictEqual(messageBody.providerID, undefined, 'providerID must not be top-level');
+      assert.strictEqual(messageBody.modelID, undefined, 'modelID must not be top-level');
     });
 
     test('returns success with warning when session created but message fails', async () => {
@@ -1726,7 +1729,7 @@ Check for bugs and security issues.`;
       assert.strictEqual(commandBody.model, 'anthropic/claude-sonnet-4-20250514', 'Should pass model as string');
     });
 
-    test('passes model as providerID/modelID to /message endpoint', async () => {
+    test('passes model as nested model object to /message endpoint', async () => {
       const { sendMessageToSession } = await import('../../service/actions.js');
       
       let messageBody = null;
@@ -1756,8 +1759,11 @@ Check for bugs and security issues.`;
         }
       );
       
-      assert.strictEqual(messageBody.providerID, 'anthropic', 'Should parse provider from model');
-      assert.strictEqual(messageBody.modelID, 'claude-haiku-3.5', 'Should parse model ID');
+      assert.ok(messageBody.model, 'Should include model object');
+      assert.strictEqual(messageBody.model.providerID, 'anthropic', 'Should parse provider from model');
+      assert.strictEqual(messageBody.model.modelID, 'claude-haiku-3.5', 'Should parse model ID');
+      assert.strictEqual(messageBody.providerID, undefined, 'providerID must not be top-level');
+      assert.strictEqual(messageBody.modelID, undefined, 'modelID must not be top-level');
     });
 
     test('defaults to anthropic provider when model has no slash', async () => {
@@ -1790,8 +1796,11 @@ Check for bugs and security issues.`;
         }
       );
       
-      assert.strictEqual(messageBody.providerID, 'anthropic', 'Should default to anthropic provider');
-      assert.strictEqual(messageBody.modelID, 'claude-haiku-3.5', 'Should use full string as model ID');
+      assert.ok(messageBody.model, 'Should include model object');
+      assert.strictEqual(messageBody.model.providerID, 'anthropic', 'Should default to anthropic provider');
+      assert.strictEqual(messageBody.model.modelID, 'claude-haiku-3.5', 'Should use full string as model ID');
+      assert.strictEqual(messageBody.providerID, undefined, 'providerID must not be top-level');
+      assert.strictEqual(messageBody.modelID, undefined, 'modelID must not be top-level');
     });
   });
 

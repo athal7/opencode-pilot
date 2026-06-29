@@ -29,6 +29,18 @@ import { SessionContext } from "./session-context.js";
 import path from "path";
 import os from "os";
 
+/**
+ * Parse a model string (e.g. "anthropic/claude-sonnet-4") into the nested
+ * object shape required by POST /session/{id}/message: { providerID, modelID }.
+ * When no slash is present the provider defaults to "anthropic".
+ */
+function buildModelPayload(modelStr) {
+  const [providerID, modelID] = modelStr.includes('/')
+    ? modelStr.split('/', 2)
+    : ['anthropic', modelStr];
+  return { providerID, modelID };
+}
+
 // Safety timeout for the server to return HTTP response headers.
 // The /command endpoint can take 30-45s to return headers because it does
 // work before responding. The /message endpoint returns headers in ~1ms.
@@ -669,13 +681,8 @@ export async function sendMessageToSession(serverUrl, sessionId, directory, prom
         if (options.agent) {
           messageBody.agent = options.agent;
         }
-        
         if (options.model) {
-          const [providerID, modelID] = options.model.includes('/') 
-            ? options.model.split('/', 2) 
-            : ['anthropic', options.model];
-          messageBody.providerID = providerID;
-          messageBody.modelID = modelID;
+          messageBody.model = buildModelPayload(options.model);
         }
         
         response = await fetchFn(messageUrl.toString(), {
@@ -685,6 +692,7 @@ export async function sendMessageToSession(serverUrl, sessionId, directory, prom
           signal: controller.signal,
         });
       }
+
       
       // Headers received — cancel the safety timeout
       headersReceived = true;
@@ -873,13 +881,9 @@ export async function createSessionViaApi(serverUrl, sessionCtx, prompt, options
           messageBody.agent = options.agent;
         }
         
-        // Add model if specified (format: provider/model)
+        // Add model if specified (format: provider/model or bare model name)
         if (options.model) {
-          const [providerID, modelID] = options.model.includes('/') 
-            ? options.model.split('/', 2) 
-            : ['anthropic', options.model];
-          messageBody.providerID = providerID;
-          messageBody.modelID = modelID;
+          messageBody.model = buildModelPayload(options.model);
         }
         
         response = await fetchFn(messageUrl.toString(), {
