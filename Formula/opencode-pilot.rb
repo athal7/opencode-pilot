@@ -1,3 +1,7 @@
+# NOTE: This formula has moved to athal7/homebrew-tap.
+# Install with: brew install athal7/tap/opencode-pilot
+# This copy is kept for backward compatibility only.
+
 class OpencodePilot < Formula
   desc "Automation daemon for OpenCode - polls GitHub/Linear issues and spawns sessions"
   homepage "https://github.com/athal7/opencode-pilot"
