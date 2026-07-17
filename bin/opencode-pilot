@@ -11,7 +11,7 @@
  *   help        Show help
  */
 
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { dirname, join } from "path";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { execSync, spawn } from "child_process";
@@ -234,7 +234,7 @@ async function startCommand() {
   writePidFile();
   
   // Dynamic import of the service module
-  const { startService, stopService } = await import(serverPath);
+  const { startService, stopService } = await import(pathToFileURL(serverPath).href);
   
   const config = {
     httpPort: getPortFromConfig(),
@@ -324,7 +324,7 @@ function stopCommand() {
 // ============================================================================
 
 async function statusCommand() {
-  const { getVersion } = await import(join(serviceDir, "version.js"));
+  const { getVersion } = await import(pathToFileURL(join(serviceDir, "version.js")).href);
   const version = getVersion();
   console.log(`opencode-pilot v${version}`);
   console.log("=".repeat(`opencode-pilot v${version}`.length));
@@ -415,7 +415,7 @@ async function configCommand() {
   // Validate sources section (use getSources to expand presets)
   console.log("");
   console.log("Sources:");
-  const { loadRepoConfig, getSources } = await import(join(serviceDir, "repo-config.js"));
+  const { loadRepoConfig, getSources } = await import(pathToFileURL(join(serviceDir, "repo-config.js")).href);
   loadRepoConfig(PILOT_CONFIG_FILE);
   
   let sources;
@@ -529,7 +529,7 @@ async function configCommand() {
 
 async function testSourceCommand(sourceName) {
   // Load sources using getSources() to expand presets
-  const { loadRepoConfig, getSources } = await import(join(serviceDir, "repo-config.js"));
+  const { loadRepoConfig, getSources } = await import(pathToFileURL(join(serviceDir, "repo-config.js")).href);
   loadRepoConfig(PILOT_CONFIG_FILE);
   
   let sources;
@@ -585,7 +585,7 @@ async function testSourceCommand(sourceName) {
   if (source.agent) console.log(`  agent: ${source.agent}`);
 
   // Show mappings (using getToolProviderConfig which includes preset defaults)
-  const { getToolProviderConfig } = await import(join(serviceDir, "repo-config.js"));
+  const { getToolProviderConfig } = await import(pathToFileURL(join(serviceDir, "repo-config.js")).href);
   const provider = source.tool?.mcp;
   const toolProviderConfig = getToolProviderConfig(provider);
   const mappings = toolProviderConfig?.mappings;
@@ -611,7 +611,7 @@ async function testSourceCommand(sourceName) {
   try {
     // Import poller
     const pollerPath = join(serviceDir, "poller.js");
-    const { pollGenericSource, applyMappings } = await import(pollerPath);
+    const { pollGenericSource, applyMappings } = await import(pathToFileURL(pollerPath).href);
     
     // Fetch items with tool provider config (includes mappings and response_key)
     const items = await pollGenericSource(source, { toolProviderConfig });
@@ -685,7 +685,7 @@ async function testMappingCommand(mcpName) {
     console.error("");
     
     // Show available tools with mappings
-    const { loadRepoConfig, getToolMappings } = await import(join(serviceDir, "repo-config.js"));
+    const { loadRepoConfig, getToolMappings } = await import(pathToFileURL(join(serviceDir, "repo-config.js")).href);
     loadRepoConfig(PILOT_CONFIG_FILE);
     
     console.error("Configured MCP servers with mappings:");
@@ -725,8 +725,8 @@ async function testMappingCommand(mcpName) {
   }
 
   // Load mappings
-  const { loadRepoConfig, getToolMappings } = await import(join(serviceDir, "repo-config.js"));
-  const { applyMappings } = await import(join(serviceDir, "poller.js"));
+  const { loadRepoConfig, getToolMappings } = await import(pathToFileURL(join(serviceDir, "repo-config.js")).href);
+  const { applyMappings } = await import(pathToFileURL(join(serviceDir, "poller.js")).href);
   
   loadRepoConfig(PILOT_CONFIG_FILE);
   const mappings = getToolMappings(mcpName);
@@ -775,8 +775,8 @@ async function testMappingCommand(mcpName) {
 
 async function clearCommand(flags) {
   try {
-    const { createPoller } = await import(join(serviceDir, "poller.js"));
-    const { loadRepoConfig, getCleanupTtlDays } = await import(join(serviceDir, "repo-config.js"));
+    const { createPoller } = await import(pathToFileURL(join(serviceDir, "poller.js")).href);
+    const { loadRepoConfig, getCleanupTtlDays } = await import(pathToFileURL(join(serviceDir, "repo-config.js")).href);
     
     // Load config for TTL settings
     if (existsSync(PILOT_CONFIG_FILE)) {
