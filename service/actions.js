@@ -20,7 +20,7 @@
  */
 
 import { execSync } from "child_process";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, accessSync, constants } from "fs";
 import { debug } from "./logger.js";
 import { getNestedValue } from "./utils.js";
 import { getServerPort } from "./repo-config.js";
@@ -187,9 +187,28 @@ async function sendCommand(serverUrl, sessionId, directory, parsedCommand, optio
  */
 async function getOpencodePorts() {
   try {
-    // Use full path to lsof since /usr/sbin may not be in PATH in all contexts
+    const lsofPaths = [
+      '/usr/sbin/lsof',
+      '/usr/bin/lsof',
+      '/bin/lsof',
+      '/sbin/lsof'
+    ];
+    let lsofBin = 'lsof';
+    for (const p of lsofPaths) {
+      if (existsSync(p)) {
+        try {
+          accessSync(p, constants.X_OK);
+          lsofBin = p;
+          break;
+        } catch {
+          // Path exists but is not executable, continue to next candidate
+        }
+      }
+    }
+
+    // Use full path to lsof since standard paths may not be in PATH in all contexts
     // (e.g., when running as a service or from certain shell environments)
-    const output = execSync('/usr/sbin/lsof -i -P 2>/dev/null | grep -E "opencode.*LISTEN" || true', {
+    const output = execSync(`${lsofBin} -i -P 2>/dev/null | grep -E "opencode.*LISTEN" || true`, {
       encoding: 'utf-8',
       timeout: 30000
     });
@@ -290,7 +309,15 @@ export async function discoverOpencodeServer(targetDir, options = {}) {
   const fetchFn = options.fetch || fetch;
   const preferredPort = options.preferredPort ?? getServerPort();
   
-  const ports = await getPorts();
+  let ports = await getPorts();
+
+  // If a preferredPort is configured but not already detected via lsof
+  // (e.g. because lsof couldn't find/see it, or lsof isn't available),
+  // append it to the ports list so that we still attempt to discover it.
+  if (preferredPort && !ports.includes(preferredPort)) {
+    ports = [...ports, preferredPort];
+  }
+
   if (ports.length === 0) {
     debug('discoverOpencodeServer: no servers found');
     return null;

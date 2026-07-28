@@ -653,6 +653,29 @@ Check for bugs and security issues.`;
       
       assert.strictEqual(result, null, 'Should return null when server returns unhealthy project data');
     });
+
+    test('checks configured preferredPort even when getPorts returns no ports', async () => {
+      const { discoverOpencodeServer } = await import('../../service/actions.js');
+
+      const mockPorts = async () => [];
+      const mockFetch = async (url) => {
+        if (url === 'http://localhost:4096/project/current') {
+          return {
+            ok: true,
+            json: async () => ({ id: 'preferred-proj', worktree: '/Users/test/project', sandboxes: [], time: { created: 1 } })
+          };
+        }
+        return { ok: false };
+      };
+
+      const result = await discoverOpencodeServer('/Users/test/project', {
+        getPorts: mockPorts,
+        fetch: mockFetch,
+        preferredPort: 4096
+      });
+
+      assert.strictEqual(result, 'http://localhost:4096');
+    });
   });
 
   describe('executeAction', () => {
