@@ -20,7 +20,7 @@
  */
 
 import { execSync } from "child_process";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, accessSync, constants } from "fs";
 import { debug } from "./logger.js";
 import { getNestedValue } from "./utils.js";
 import { getServerPort } from "./repo-config.js";
@@ -196,8 +196,13 @@ async function getOpencodePorts() {
     let lsofBin = 'lsof';
     for (const p of lsofPaths) {
       if (existsSync(p)) {
-        lsofBin = p;
-        break;
+        try {
+          accessSync(p, constants.X_OK);
+          lsofBin = p;
+          break;
+        } catch {
+          // Path exists but is not executable, continue to next candidate
+        }
       }
     }
 
