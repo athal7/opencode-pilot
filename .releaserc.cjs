@@ -31,20 +31,6 @@ module.exports = {
     }],
     
     // Create GitHub release (creates the tag/tarball from the version-bumped commit)
-    '@semantic-release/github',
-    
-    // Update Homebrew formula with new version and SHA (runs after release is created)
-    ['@semantic-release/exec', {
-      successCmd: `
-        VERSION="\${nextRelease.version}"
-        TARBALL_URL="https://github.com/athal7/opencode-pilot/archive/refs/tags/v$VERSION.tar.gz"
-        SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | cut -d' ' -f1)
-        sed -i "s|url \\"https://github.com/athal7/opencode-pilot/archive/refs/tags/v.*\\.tar\\.gz\\"|url \\"$TARBALL_URL\\"|" Formula/opencode-pilot.rb
-        sed -i "s|sha256 \\".*\\"|sha256 \\"$SHA256\\"|" Formula/opencode-pilot.rb
-        git add Formula/opencode-pilot.rb
-        git commit -m "chore(brew): update formula to v$VERSION [skip ci]"
-        git push
-      `
-    }]
+    '@semantic-release/github'
   ]
 };
