@@ -89,4 +89,5 @@ Releases are automated via [semantic-release](https://github.com/semantic-releas
 3. Publish to npm
 4. Commit version bump (`package.json`, `package-lock.json`) back to the repo
 5. Create a GitHub release
-6. Update the Homebrew formula
+
+The Homebrew formula lives in [athal7/homebrew-tap](https://github.com/athal7/homebrew-tap) and is kept up to date by an automated reconciler workflow there.
