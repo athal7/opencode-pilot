@@ -1,5 +1,11 @@
 # Agent Instructions
 
+## Release policy — read before touching CI/release config
+
+This repo releases via **semantic-release** (`.releaserc.cjs`, `.github/workflows/ci.yml`) — computes the next version from Conventional Commits and publishes directly on push to main, no PR, no committed version file. `package.json`'s committed `version` is a stale placeholder; the npm registry and git tags are the only sources of truth for the release version.
+
+**Do not add `release-please`** (or any tool that proposes a version-bump pull request, or commits a version bump back to the repo). This was tried once (PRs #156–158) and reverted (#160) — it duplicated the existing semantic-release pipeline and both would have fired on every push. If you're considering a release-automation change here, it means changing `.releaserc.cjs`, not adding a second mechanism alongside it.
+
 ## Pre-Commit: Documentation Check
 
 Before committing changes, verify documentation is updated to reflect code changes:
