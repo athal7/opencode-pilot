@@ -3,7 +3,8 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "package-name": "opencode-pilot"
+      "package-name": "opencode-pilot",
+      "include-component-in-tag": false
     }
   }
 }
