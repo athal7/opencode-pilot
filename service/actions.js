@@ -22,7 +22,7 @@
 import { execSync } from "child_process";
 import { readFileSync, existsSync, accessSync, constants } from "fs";
 import { debug } from "./logger.js";
-import { getNestedValue } from "./utils.js";
+import { getNestedValue, parseJsonc } from "./utils.js";
 import { getServerPort } from "./repo-config.js";
 import { resolveWorktreeDirectory, getProjectInfo, getProjectInfoForDirectory } from "./worktree.js";
 import { SessionContext } from "./session-context.js";
@@ -81,9 +81,7 @@ export function readTargetOpencodeConfig(dir, agentName) {
 
   let parsed;
   try {
-    // Strip single-line comments for .jsonc support before parsing
-    const stripped = raw.replace(/\/\/[^\n]*/g, '');
-    parsed = JSON.parse(stripped);
+    parsed = parseJsonc(raw);
   } catch {
     return {};
   }
