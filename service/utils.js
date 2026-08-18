@@ -10,6 +10,139 @@
  * @param {string} path - Dot-separated path (e.g., "repository.full_name")
  * @returns {*} Value at path, or undefined if not found
  */
+/**
+ * Parse JSON text that may contain single-line/multi-line comments or trailing commas (JSONC)
+ * @param {string} text - JSONC string to parse
+ * @returns {*} Parsed JSON object/value
+ */
+export function parseJsonc(text) {
+  if (typeof text !== 'string') {
+    throw new TypeError('Input must be a string');
+  }
+
+  let result = '';
+  let inString = false;
+  let isEscaped = false;
+  let inSingleComment = false;
+  let inMultiComment = false;
+  let hasPendingComma = false;
+  let pendingWhitespace = '';
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+
+    if (inSingleComment) {
+      if (char === '\n' || char === '\r') {
+        inSingleComment = false;
+        if (hasPendingComma) {
+          pendingWhitespace += char;
+        } else {
+          result += char;
+        }
+      }
+      continue;
+    }
+
+    if (inMultiComment) {
+      if (char === '*' && nextChar === '/') {
+        inMultiComment = false;
+        i++; // skip '/'
+      } else if (char === '\n' || char === '\r') {
+        if (hasPendingComma) {
+          pendingWhitespace += char;
+        } else {
+          result += char;
+        }
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (hasPendingComma) {
+        result += ',' + pendingWhitespace;
+        hasPendingComma = false;
+        pendingWhitespace = '';
+      }
+      result += char;
+      if (isEscaped) {
+        isEscaped = false;
+      } else if (char === '\\') {
+        isEscaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    // Outside string and outside comment
+    if (char === '"') {
+      if (hasPendingComma) {
+        result += ',' + pendingWhitespace;
+        hasPendingComma = false;
+        pendingWhitespace = '';
+      }
+      inString = true;
+      result += char;
+      continue;
+    }
+
+    if (char === '/' && nextChar === '/') {
+      inSingleComment = true;
+      i++; // skip '/'
+      continue;
+    }
+
+    if (char === '/' && nextChar === '*') {
+      inMultiComment = true;
+      i++; // skip '*'
+      continue;
+    }
+
+    if (char === ',') {
+      if (hasPendingComma) {
+        result += ',' + pendingWhitespace;
+      }
+      hasPendingComma = true;
+      pendingWhitespace = '';
+      continue;
+    }
+
+    if (char === ']' || char === '}') {
+      if (hasPendingComma) {
+        result += pendingWhitespace;
+        hasPendingComma = false;
+        pendingWhitespace = '';
+      }
+      result += char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (hasPendingComma) {
+        pendingWhitespace += char;
+      } else {
+        result += char;
+      }
+      continue;
+    }
+
+    // Any other token character (numbers, boolean literals, null, etc.)
+    if (hasPendingComma) {
+      result += ',' + pendingWhitespace;
+      hasPendingComma = false;
+      pendingWhitespace = '';
+    }
+    result += char;
+  }
+
+  if (hasPendingComma) {
+    result += ',' + pendingWhitespace;
+  }
+
+  return JSON.parse(result);
+}
+
 export function getNestedValue(obj, path) {
   const parts = path.split(".");
   let value = obj;

@@ -6,6 +6,85 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert';
 
 describe('utils.js', () => {
+  describe('parseJsonc', () => {
+    test('parses standard JSON string', async () => {
+      const { parseJsonc } = await import('../../service/utils.js');
+      const json = '{"key": "value", "number": 123, "bool": true}';
+      assert.deepStrictEqual(parseJsonc(json), { key: 'value', number: 123, bool: true });
+    });
+
+    test('strips single-line comments', async () => {
+      const { parseJsonc } = await import('../../service/utils.js');
+      const jsonc = `
+      {
+        // This is a single line comment
+        "key": "value", // inline comment
+        "mcp": {
+          // nested comment
+          "linear": { "enabled": true }
+        }
+      }
+      `;
+      assert.deepStrictEqual(parseJsonc(jsonc), {
+        key: 'value',
+        mcp: { linear: { enabled: true } },
+      });
+    });
+
+    test('strips multi-line comments', async () => {
+      const { parseJsonc } = await import('../../service/utils.js');
+      const jsonc = `
+      {
+        /* Multi-line comment
+           spanning several lines */
+        "key": "value",
+        "mcp": /* inline block comment */ {
+          "github": { "enabled": false }
+        }
+      }
+      `;
+      assert.deepStrictEqual(parseJsonc(jsonc), {
+        key: 'value',
+        mcp: { github: { enabled: false } },
+      });
+    });
+
+    test('ignores comment markers inside strings', async () => {
+      const { parseJsonc } = await import('../../service/utils.js');
+      const jsonc = `
+      {
+        "url": "https://example.com/path//not-a-comment",
+        "block": "/* also not a comment */",
+        "escaped": "quote \\" inside // string"
+      }
+      `;
+      assert.deepStrictEqual(parseJsonc(jsonc), {
+        url: 'https://example.com/path//not-a-comment',
+        block: '/* also not a comment */',
+        escaped: 'quote " inside // string',
+      });
+    });
+
+    test('handles trailing commas', async () => {
+      const { parseJsonc } = await import('../../service/utils.js');
+      const jsonc = `
+      {
+        "a": [1, 2, 3,],
+        "b": { "x": "y", },
+      }
+      `;
+      assert.deepStrictEqual(parseJsonc(jsonc), {
+        a: [1, 2, 3],
+        b: { x: 'y' },
+      });
+    });
+
+    test('throws TypeError for non-string input', async () => {
+      const { parseJsonc } = await import('../../service/utils.js');
+      assert.throws(() => parseJsonc(123), TypeError);
+    });
+  });
+
   describe('isBot', () => {
     test('detects GitHub bot usernames with [bot] suffix', async () => {
       const { isBot } = await import('../../service/utils.js');
