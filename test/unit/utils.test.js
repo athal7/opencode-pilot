@@ -83,6 +83,12 @@ describe('utils.js', () => {
       const { parseJsonc } = await import('../../service/utils.js');
       assert.throws(() => parseJsonc(123), TypeError);
     });
+
+    test('throws SyntaxError for unterminated multi-line comment', async () => {
+      const { parseJsonc } = await import('../../service/utils.js');
+      assert.throws(() => parseJsonc('{"key": "value" /*'), SyntaxError);
+      assert.throws(() => parseJsonc('{"key": "value" /* comment'), SyntaxError);
+    });
   });
 
   describe('isBot', () => {

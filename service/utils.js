@@ -139,6 +139,9 @@ export function parseJsonc(text) {
   if (hasPendingComma) {
     result += ',' + pendingWhitespace;
   }
+  if (inMultiComment) {
+    throw new SyntaxError('Unterminated multi-line comment');
+  }
 
   return JSON.parse(result);
 }
