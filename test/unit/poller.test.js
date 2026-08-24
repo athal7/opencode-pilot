@@ -996,6 +996,93 @@ describe('poller.js', () => {
     });
   });
 
+  describe('mcpConfig resolution and JSONC parsing', () => {
+    test('falls back to opencode.jsonc when opencode.json does not exist and parses comments', async () => {
+      const { pollGenericSource } = await import('../../service/poller.js');
+      const jsoncPath = join(tempDir, 'opencode.jsonc');
+      const jsonPath = join(tempDir, 'opencode.json'); // path used in option, but file won't exist
+
+      writeFileSync(jsoncPath, `
+      {
+        // Global MCP Config
+        "mcp": {
+          "linear": {
+            /* server setup */
+            "type": "remote",
+            "url": "https://mcp.linear.app/sse"
+          }
+        }
+      }
+      `);
+
+      const source = {
+        name: 'test-linear',
+        tool: { mcp: 'linear', name: 'my_issues' }
+      };
+
+      // pollGenericSource with opencodeConfigPath = jsonPath (which doesn't exist) should fall back to jsoncPath
+      // It will fail at connection time (no real server), NOT at "MCP config not found"
+      await assert.rejects(
+        async () => {
+          await pollGenericSource(source, { opencodeConfigPath: jsonPath, timeout: 100 });
+        },
+        (err) => {
+          assert.doesNotMatch(err.message, /MCP config not found/);
+          return true;
+        }
+      );
+    });
+
+    test('falls back from opencode.jsonc to opencode.json if jsonc was specified', async () => {
+      const { pollGenericSource } = await import('../../service/poller.js');
+      const jsonPath = join(tempDir, 'opencode.json');
+      const jsoncPath = join(tempDir, 'opencode.jsonc'); // specified path, doesn't exist
+
+      writeFileSync(jsonPath, JSON.stringify({
+        mcp: {
+          linear: { type: 'remote', url: 'https://mcp.linear.app/sse' }
+        }
+      }));
+
+      const source = {
+        name: 'test-linear',
+        tool: { mcp: 'linear', name: 'my_issues' }
+      };
+
+      await assert.rejects(
+        async () => {
+          await pollGenericSource(source, { opencodeConfigPath: jsoncPath, timeout: 100 });
+        },
+        (err) => {
+          assert.doesNotMatch(err.message, /MCP config not found/);
+          return true;
+        }
+      );
+    });
+
+    test('throws descriptive error mentioning searched paths when neither file exists', async () => {
+      const { pollGenericSource } = await import('../../service/poller.js');
+      const jsonPath = join(tempDir, 'nonexistent.json');
+
+      const source = {
+        name: 'test-linear',
+        tool: { mcp: 'linear', name: 'my_issues' }
+      };
+
+      await assert.rejects(
+        async () => {
+          await pollGenericSource(source, { opencodeConfigPath: jsonPath });
+        },
+        (err) => {
+          assert.match(err.message, /MCP config not found:/);
+          assert.ok(err.message.includes('nonexistent.json'));
+          assert.ok(err.message.includes('nonexistent.jsonc'));
+          return true;
+        }
+      );
+    });
+  });
+
   describe('pollGenericSource', () => {
     test('extracts tool config from source', async () => {
       const { getToolConfig } = await import('../../service/poller.js');

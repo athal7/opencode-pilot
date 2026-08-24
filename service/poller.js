@@ -12,7 +12,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { getNestedValue, hasNonBotFeedback, getLatestFeedbackTimestamp, extractIssueRefs } from "./utils.js";
+import { getNestedValue, hasNonBotFeedback, getLatestFeedbackTimestamp, extractIssueRefs, parseJsonc } from "./utils.js";
 
 /**
  * Expand template string with item fields
@@ -196,16 +196,50 @@ async function createTransport(mcpConfig) {
 }
 
 /**
- * Get MCP config from opencode.json
+ * Get MCP config from opencode.json or opencode.jsonc
  */
 function getMcpConfig(serverName, configPath) {
-  const actualPath = configPath || path.join(os.homedir(), ".config/opencode/opencode.json");
-  
-  if (!fs.existsSync(actualPath)) {
-    throw new Error(`MCP config not found: ${actualPath}`);
+  let actualPath;
+  const searchedPaths = [];
+
+  if (configPath) {
+    searchedPaths.push(configPath);
+    if (fs.existsSync(configPath)) {
+      actualPath = configPath;
+    } else {
+      // Try alternate extension if configPath was specified with .json or .jsonc
+      if (configPath.endsWith('.json')) {
+        const altPath = configPath + 'c';
+        searchedPaths.push(altPath);
+        if (fs.existsSync(altPath)) {
+          actualPath = altPath;
+        }
+      } else if (configPath.endsWith('.jsonc')) {
+        const altPath = configPath.slice(0, -1);
+        searchedPaths.push(altPath);
+        if (fs.existsSync(altPath)) {
+          actualPath = altPath;
+        }
+      }
+    }
+  } else {
+    const defaultJsonPath = path.join(os.homedir(), ".config/opencode/opencode.json");
+    const defaultJsoncPath = path.join(os.homedir(), ".config/opencode/opencode.jsonc");
+    searchedPaths.push(defaultJsonPath, defaultJsoncPath);
+
+    if (fs.existsSync(defaultJsonPath)) {
+      actualPath = defaultJsonPath;
+    } else if (fs.existsSync(defaultJsoncPath)) {
+      actualPath = defaultJsoncPath;
+    }
   }
 
-  const config = JSON.parse(fs.readFileSync(actualPath, "utf-8"));
+  if (!actualPath) {
+    throw new Error(`MCP config not found: ${searchedPaths.join(" or ")}`);
+  }
+
+  const rawContent = fs.readFileSync(actualPath, "utf-8");
+  const config = parseJsonc(rawContent);
   const mcpConfig = config.mcp?.[serverName];
 
   if (!mcpConfig) {
