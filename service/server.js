@@ -45,14 +45,16 @@ function createHttpServer_(port) {
   const server = createHttpServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`)
     
+    // Reject cross-origin requests; this service is intended for local use only
+    if (req.headers.origin) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' })
+      res.end('Forbidden')
+      return
+    }
+    
     // OPTIONS - CORS preflight
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Max-Age': '86400',
-      })
+      res.writeHead(204)
       res.end()
       return
     }
