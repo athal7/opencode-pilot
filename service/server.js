@@ -11,7 +11,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import YAML from 'yaml'
 import { getVersion } from './version.js'
-
+import { getOrCreateAuthToken, isValidAuthHeader } from './auth.js'
 // Default configuration
 const DEFAULT_HTTP_PORT = 4097
 const DEFAULT_REPOS_CONFIG = join(homedir(), '.config', 'opencode', 'pilot', 'config.yaml')
@@ -39,24 +39,33 @@ function getPortFromConfig() {
 /**
  * Create the HTTP server (health check only)
  * @param {number} port - Port to listen on
+ * @param {string} authToken - Bearer token required for requests
  * @returns {http.Server} The HTTP server
  */
-function createHttpServer_(port) {
+function createHttpServer_(port, authToken) {
   const server = createHttpServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`)
-    
-    // OPTIONS - CORS preflight
+
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Max-Age': '86400',
       })
       res.end()
       return
     }
-    
+
+    if (!isValidAuthHeader(req.headers.authorization, authToken)) {
+      res.writeHead(401, {
+        'Content-Type': 'text/plain',
+        'WWW-Authenticate': 'Bearer',
+      })
+      res.end('Unauthorized')
+      return
+    }
+
     // GET /health - Health check with version
     if (req.method === 'GET' && url.pathname === '/health') {
       const version = getVersion()
@@ -64,16 +73,16 @@ function createHttpServer_(port) {
       res.end(JSON.stringify({ status: 'ok', version }))
       return
     }
-    
+
     // Unknown route
     res.writeHead(404, { 'Content-Type': 'text/plain' })
     res.end('Not found')
   })
-  
+
   server.on('error', (err) => {
     console.error(`[opencode-pilot] HTTP server error: ${err.message}`)
   })
-  
+
   return server
 }
 
@@ -84,6 +93,8 @@ function createHttpServer_(port) {
  * @param {boolean} [config.enablePolling] - Enable polling for tracker items (default: true)
  * @param {number} [config.pollInterval] - Poll interval in ms (default: 5 minutes)
  * @param {string} [config.reposConfig] - Path to config.yaml
+ * @param {string} [config.authToken] - Bearer token for HTTP requests
+ * @param {string} [config.authTokenPath] - Path to the bearer token file
  * @returns {Promise<Object>} Service instance with httpServer and polling state
  */
 export async function startService(config = {}) {
@@ -91,13 +102,14 @@ export async function startService(config = {}) {
   const enablePolling = config.enablePolling !== false
   const pollInterval = config.pollInterval ?? DEFAULT_POLL_INTERVAL
   const reposConfig = config.reposConfig ?? DEFAULT_REPOS_CONFIG
+  const authToken = config.authToken ?? getOrCreateAuthToken(config.authTokenPath)
   
   // Create HTTP server
-  const httpServer = createHttpServer_(httpPort)
+  const httpServer = createHttpServer_(httpPort, authToken)
   
   // Start HTTP server
   await new Promise((resolve, reject) => {
-    httpServer.listen(httpPort, () => {
+    httpServer.listen(httpPort, '127.0.0.1', () => {
       const actualPort = httpServer.address().port
       console.log(`[opencode-pilot] HTTP server listening on port ${actualPort}`)
       resolve()

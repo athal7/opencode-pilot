@@ -10,6 +10,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import YAML from 'yaml'
 import { getVersion } from '../service/version.js'
+import { createAuthHeaders, readAuthToken } from '../service/auth.js'
 
 const DEFAULT_PORT = 4097
 const CONFIG_PATH = join(homedir(), '.config', 'opencode', 'pilot', 'config.yaml')
@@ -72,26 +73,35 @@ export const PilotPlugin = async () => {
   
   try {
     // Check if daemon is already running
-    const res = await fetch(`http://localhost:${port}/health`, {
+    const authToken = readAuthToken()
+    const res = await fetch(`http://127.0.0.1:${port}/health`, {
+      headers: createAuthHeaders(authToken),
       signal: AbortSignal.timeout(1000)
     })
-    
-    if (res.ok) {
-      // Check version
-      const data = await res.json()
-      const runningVersion = data.version
-      
-      if (runningVersion && runningVersion !== ourVersion && ourVersion !== 'unknown') {
-        // Version mismatch - restart daemon
-        console.log(`[opencode-pilot] Version mismatch (running: ${runningVersion}, plugin: ${ourVersion}), restarting...`)
+
+    if (!res.ok) {
+      if (res.status === 401) {
         stopDaemon()
-        // Small delay to ensure port is released
         await new Promise(resolve => setTimeout(resolve, 500))
-        startDaemon()
       }
-      // else: same version, nothing to do
+      startDaemon()
       return {}
     }
+
+    // Check version
+    const data = await res.json()
+    const runningVersion = data.version
+
+    if (runningVersion && runningVersion !== ourVersion && ourVersion !== 'unknown') {
+      // Version mismatch - restart daemon
+      console.log(`[opencode-pilot] Version mismatch (running: ${runningVersion}, plugin: ${ourVersion}), restarting...`)
+      stopDaemon()
+      // Small delay to ensure port is released
+      await new Promise(resolve => setTimeout(resolve, 500))
+      startDaemon()
+    }
+    // else: same version, nothing to do
+    return {}
   } catch {
     // Not running or error, start it
     startDaemon()

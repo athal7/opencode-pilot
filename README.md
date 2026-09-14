@@ -48,6 +48,8 @@ opencode-pilot start
    opencode-pilot start
    ```
 
+The service listens on `127.0.0.1` and protects its HTTP endpoints with a bearer token. The token is created automatically at `~/.config/opencode/pilot/server.token` with owner-only permissions.
+
 ## Configuration
 
 See [examples/config.yaml](examples/config.yaml) for a complete example with all options.
